@@ -1,20 +1,16 @@
-# Xray 交互式安装与管理脚本
+# Xray 一键安装与管理脚本
 
-这是一个面向 **Debian/Ubuntu** 和 **Alpine Linux** 的 Xray 管理脚本，支持创建和维护：
+适用于 Debian、Ubuntu 和 Alpine。脚本可以创建：
 
-- VLESS + REALITY + XTLS Vision
+- VLESS Reality
 - Shadowsocks 2022
-- Hysteria2（TLS 证书路径方式）
-- IPv4、IPv6、双栈 IPv6 优先
-- v2rayN 分享链接
-- 终端二维码
-- 配置修改、重启、状态查看和安全卸载
+- Hysteria2
 
-项目地址：<https://github.com/GithubPlusMaxPro/xray_install>
+配置完成后，终端会显示节点分享链接和二维码。
 
-## 安装和运行
+## 一、安装
 
-使用 root 执行。推荐先下载脚本再运行，便于以后重复使用：
+使用 `root` 登录服务器，执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/xray.sh -o xray.sh
@@ -22,19 +18,17 @@ chmod +x xray.sh
 sh xray.sh
 ```
 
+建议先下载再运行，之后可以重复使用这个脚本。
+
 也可以直接运行：
 
 ```bash
-curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/xray.sh | sh
+curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/xray.sh | sh
 ```
 
-脚本会自动安装 Xray 和必要依赖（包括用于读取网卡地址的 `iproute2`）。它不会自动创建任何 VLESS 或 SS2022 入站，只有在菜单中完成对应协议的配置并保存后，才会写入配置文件。
+## 二、菜单
 
-首次运行时，终端会打印当前进度，包括系统检测、依赖安装、Xray 下载与安装、配置初始化和服务启动。下载 Xray 时会显示进度条；后续运行如果依赖已经存在，会跳过软件包安装。
-
-## 交互菜单
-
-运行 `sh xray.sh` 后显示：
+运行 `sh xray.sh` 后，会看到：
 
 ```text
 1) 配置/修改 VLESS Reality
@@ -42,198 +36,152 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 3) 重启 Xray
 4) 查看状态
 5) 查看节点和配置摘要
-6) 卸载 Xray（可选择保留备份或清空）
+6) 卸载 Xray
 7) 编辑 Xray 配置文件
-8) 删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2
+8) 删除节点
 9) 配置/修改 Hysteria2
 0) 退出
 ```
 
-配置完成后，脚本会询问是否立即重启 Xray。也可以稍后从菜单选择“重启 Xray”。
+## 三、创建 VLESS Reality
 
-再次配置同一协议时，已有参数会作为默认值，可以修改端口、域名、加密方式和 IP 模式。配置另一个协议不会删除已经保存的协议。
+1. 选择 `1`。
+2. 按提示填写服务器域名或公网 IP。
+3. 填写端口。
+4. 填写 Reality 伪装目标和 SNI。
+5. 选择 IP 模式。
+6. 按提示确认保存并重启。
 
-## 配置选项
+如果已经配置过，再次进入时会自动显示原来的内容，直接回车即可保留。
 
-### VLESS Reality
+服务器地址要填写客户端能访问的域名或公网 IP，不要填写 `192.168.x.x`、`10.x.x.x` 等内网地址。
 
-脚本会询问：
+## 四、创建 Shadowsocks 2022
 
-- 服务器域名或 IP：只用于生成客户端分享链接，默认尝试读取本机网卡地址
-- VLESS 监听端口
-- Reality 伪装目标 `域名` 或 `域名:端口`
-- Reality SNI
-- IP 模式
-- 是否保留现有 UUID 和 Reality 密钥
+1. 选择 `2`。
+2. 填写服务器域名或公网 IP。
+3. 填写端口。
+4. 选择加密方式。
+5. 选择 IP 模式。
+6. 确认保存并重启。
 
-如果不保留旧密钥，脚本会重新生成 UUID、Reality 私钥、公钥和 Short ID。保留旧密钥可以避免已经导入客户端的节点失效。
+脚本会自动生成密码，也可以在再次配置时修改密码。
 
-### Shadowsocks 2022
+## 五、创建 Hysteria2
 
-脚本会询问：
+1. 选择 `9`。
+2. 填写服务器域名或公网 IP。
+3. 填写 UDP 端口。
+4. 填写证书域名。
+5. 填写证书完整路径。
+6. 填写私钥完整路径。
+7. 设置密码。
+8. 选择 IP 模式并保存。
 
-- 服务器域名或 IP：只用于生成客户端分享链接，默认尝试读取本机网卡地址
-- SS2022 监听端口
-- 加密方式
-- IP 模式
-- 是否保留现有密码
-
-支持的加密方式：
-
-```text
-2022-blake3-aes-128-gcm
-2022-blake3-aes-256-gcm（推荐）
-2022-blake3-chacha20-poly1305
-```
-
-### Hysteria2
-
-脚本使用 Xray 的 `hysteria` 入站协议并固定 `version: 2`。配置时需要填写：
-
-- 服务器域名或 IP：只用于生成客户端分享链接，默认尝试读取本机网卡地址
-- Hysteria2 UDP 端口
-- TLS SNI/证书域名
-- TLS 证书文件完整路径
-- TLS 私钥文件完整路径
-- Hysteria2 密码
-- IP 模式
-
-脚本不会申请、生成或复制证书，只会把你填写的证书路径写入 Xray 配置，并在保存前检查两个文件是否可读。例如：
+证书需要提前准备好。例如：
 
 ```text
 /etc/ssl/xray/fullchain.pem
 /etc/ssl/xray/privkey.pem
 ```
 
-Hysteria2 使用 UDP/QUIC，服务器防火墙和云安全组必须放行 UDP 端口。
+脚本只读取你填写的证书，不会自动申请证书。使用 Hysteria2 时，要在云服务器安全组和系统防火墙放行对应的 UDP 端口。
 
-### IP 模式
+## 六、查看节点和二维码
 
-```text
-UseIPv6v4  双栈监听，IPv6 优先，失败回落 IPv4
-UseIPv4    仅 IPv4
-UseIPv6    仅 IPv6
-AsIs       Xray 默认，不强制指定地址族
-```
+选择菜单 `5`，脚本会显示：
 
-脚本菜单中的第 4 项 `AsIs` 使用 Xray 内核默认策略，监听地址仍为 `::`，域名解析交给系统/Go 网络栈处理。这里控制的是 Xray 的监听和出站解析策略；客户端设备本身是否优先 IPv6，还取决于客户端系统、DNS 和网络运营商。
+- VLESS 分享链接
+- SS2022 分享链接
+- Hysteria2 分享链接
+- 终端二维码
 
-这些名称对应 Xray `freedom` 出站的 `domainStrategy` 配置项。`UseIPv6v4` 表示 IPv6 优先、IPv4 回落；`UseIPv4` 和 `UseIPv6` 分别限制为单一地址族。
+在 v2rayN 等客户端中，可以直接复制分享链接导入。二维码只在当前终端显示，不会生成图片文件。
 
-## 节点信息和二维码
+## 七、常用操作
 
-配置完成后，终端会显示：
+### 重启
 
-- v2rayN/兼容客户端可导入的 `vless://`、`ss://` 或 `hysteria2://` 分享字符串
-- 尝试直接显示的终端二维码
-- VLESS 的公钥、Short ID 等参数
-- SS2022 的加密方式和密码
-
-菜单中的“查看节点和配置摘要”可以再次显示已保存节点。二维码只显示在终端，不会生成 PNG 或额外二维码文件。
-
-如果系统没有 `qrencode`，分享字符串仍会正常显示。Debian/Ubuntu 会自动安装 `qrencode`；Alpine 会尝试安装可用的 `libqrencode-tools` 包。
-
-## 命令行参数
+选择菜单 `3`，或执行：
 
 ```bash
-sh xray.sh                            # 打开交互菜单
-sh xray.sh --vless                    # 直接配置/修改 VLESS Reality
-sh xray.sh --ss                       # 直接配置/修改 Shadowsocks 2022
-sh xray.sh --hy2                      # 直接配置/修改 Hysteria2
-sh xray.sh --edit                     # 编辑并检查 Xray 配置文件
-sh xray.sh --remove                   # 交互选择并删除 VLESS、SS2022 或 Hysteria2
-sh xray.sh --remove-vless             # 删除 VLESS Reality 入站
-sh xray.sh --remove-ss                # 删除 Shadowsocks 2022 入站
-sh xray.sh --remove-hy2               # 删除 Hysteria2 入站
-sh xray.sh --restart                  # 重启 Xray
-sh xray.sh --status                   # 查看 Xray 状态
-sh xray.sh --help                    # 查看帮助
-sh xray.sh --uninstall                # 交互确认后卸载
-sh xray.sh --uninstall --yes          # 无交互卸载，默认保留备份
-sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
+sh xray.sh --restart
 ```
 
-`--purge` 会永久删除配置、节点信息和日志。没有同时指定 `--yes` 时，脚本仍会要求交互确认。
+### 查看状态
 
-## 文件和服务
-
-主要文件：
-
-```text
-/usr/local/bin/xray              Xray 内核
-/usr/local/etc/xray/config.json  Xray 配置
-/root/xray-nodes.json            节点参数和客户端信息
-/var/log/xray/access.log         访问日志
-/var/log/xray/error.log          错误日志
-```
-
-节点文件包含 Reality 私钥和 SS2022 密码，权限为 `600`，不要公开或提交到 Git 仓库。
-
-修改配置时，脚本会先生成临时 JSON 并运行 Xray 配置检查，检查通过后再替换正式配置文件；不会为每次修改自动生成旧配置备份。
-
-也可以通过菜单第 7 项或 `sh xray.sh --edit` 手动编辑完整配置。脚本会先编辑临时文件，只有 Xray 检查通过后才会覆盖正式配置；检查失败时原配置保持不变。编辑器按 `EDITOR`、`vi`、`vim`、`nano` 的顺序选择。
-
-菜单第 8 项可以单独删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2。删除操作会同步移除对应入站和节点信息，不会影响其他协议；删除前需要确认，删除后可以选择重启 Xray。
-
-编辑和交互菜单需要可用的 TTY。建议先下载脚本再运行，不要在没有终端的后台任务中使用管道方式启动。
-
-Debian/Ubuntu 使用 systemd 管理服务，Alpine 使用 OpenRC。配置完成后选择立即重启，或运行 `sh xray.sh --restart`，脚本会自动加入开机自启。
-
-Debian/Ubuntu 实际执行的服务操作相当于：
+选择菜单 `4`，或执行：
 
 ```bash
-systemctl enable xray
-systemctl restart xray
+sh xray.sh --status
 ```
 
-Alpine 实际执行的服务操作相当于：
+### 编辑配置
+
+选择菜单 `7`，或执行：
 
 ```bash
-rc-update add xray default
-rc-service xray restart
+sh xray.sh --edit
 ```
 
-检查服务状态：
+编辑完成后按编辑器提示保存并退出。脚本会检查配置，检查失败时不会替换原配置。
+
+### 删除节点
+
+选择菜单 `8`，然后选择要删除的协议。删除一个协议不会影响其他协议。
+
+也可以直接删除：
 
 ```bash
-systemctl status xray       # Debian/Ubuntu
-rc-service xray status      # Alpine
+sh xray.sh --remove-vless
+sh xray.sh --remove-ss
+sh xray.sh --remove-hy2
 ```
 
-## 卸载和恢复
+### 直接进入配置
 
-普通卸载不会直接删除数据：
+```bash
+sh xray.sh --vless
+sh xray.sh --ss
+sh xray.sh --hy2
+```
+
+## 八、卸载
+
+执行：
 
 ```bash
 sh xray.sh --uninstall
 ```
 
-确认卸载后，脚本会继续询问是否清空数据。默认选择“不清空”，相关文件会移动到：
+卸载时可以选择：
 
-```text
-/root/xray-uninstall-backup-YYYYMMDDHHMMSS/
-```
+- 保留配置、节点信息和日志
+- 清空所有数据
 
-备份内容包括配置、节点信息、日志、Xray 内核和服务文件。需要恢复时，可从该目录取回文件后重新安装或启动 Xray。
+建议第一次卸载时选择保留，方便以后恢复。选择清空后无法恢复。
 
-选择清空，或运行下面的命令，会永久删除这些数据，无法恢复：
+## 九、开机启动
+
+配置完成并重启后，Xray 会加入系统开机启动。服务器重启后会自动运行。
+
+## 十、更新脚本
+
+重新下载即可：
 
 ```bash
-sh xray.sh --uninstall --purge --yes
+curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/xray.sh -o xray.sh
+chmod +x xray.sh
 ```
 
-卸载不会删除系统通用依赖，例如 `curl`、`openssl`、`jq` 和 `qrencode`。
+## 十一、端口检查
 
-## 防火墙和端口
+如果客户端无法连接，请检查：
 
-脚本不会自动修改云防火墙、iptables、nftables 或 UFW。请根据实际配置，在服务器安全组和防火墙中放行 VLESS、SS2022 使用的 TCP 端口，以及 Hysteria2 使用的 UDP 端口。
+1. 域名是否解析到服务器公网 IP。
+2. 云服务器安全组是否放行端口。
+3. 系统防火墙是否放行端口。
+4. Hysteria2 是否放行了 UDP，而不是只放行 TCP。
+5. 节点中的地址、端口、密码和证书域名是否填写正确。
 
-如果使用域名生成节点链接，请确认域名解析到了服务器，并且客户端能够访问对应端口。
-
-脚本会优先通过本机路由表读取实际出站网卡地址，再从全局网卡地址兜底。如果服务器位于 NAT 后，自动读取到的可能是 `192.168.x.x`、`10.x.x.x` 等内网地址；公网客户端连接时，请手动改成公网 IP 或域名。
-
-## 安全提示
-
-- 不要把 `/root/xray-nodes.json`、Reality 私钥或 SS2022 密码发布到 GitHub。
-- 修改 Reality 私钥或 UUID 后，旧客户端节点需要重新导入。
-- 卸载前如需保留节点，选择保留备份，不要使用 `--purge`。
+项目地址：<https://github.com/GithubPlusMaxPro/xray_install>
