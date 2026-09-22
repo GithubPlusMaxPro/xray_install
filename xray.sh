@@ -386,7 +386,7 @@ write_config() {
     inbound_json=$1
     remove_tag_one=$2
     remove_tag_two=$3
-    tmp_config="$CONFIG_FILE.new.$$"
+    tmp_config="$CONFIG_FILE.new.$$.json"
 
     jq --argjson inbound "$inbound_json" \
        --arg strategy "$DOMAIN_STRATEGY" \
@@ -405,7 +405,7 @@ write_config() {
           end)' "$CONFIG_FILE" > "$tmp_config"
 
     info "检查 Xray 配置"
-    "$XRAY_BIN" run -test -config "$tmp_config"
+    "$XRAY_BIN" run -test -format json -config "$tmp_config"
     backup="$CONFIG_FILE.bak.$(date +%Y%m%d%H%M%S)"
     cp -p "$CONFIG_FILE" "$backup"
     mv "$tmp_config" "$CONFIG_FILE"
