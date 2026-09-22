@@ -139,7 +139,28 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 /usr/local/etc/xray/config.json.bak.时间戳
 ```
 
-Debian/Ubuntu 使用 systemd 管理服务，Alpine 使用 OpenRC。脚本会自动选择对应的服务管理器。
+Debian/Ubuntu 使用 systemd 管理服务，Alpine 使用 OpenRC。配置完成后选择立即重启，或运行 `sh xray.sh --restart`，脚本会自动加入开机自启。
+
+Debian/Ubuntu 实际执行的服务操作相当于：
+
+```bash
+systemctl enable xray
+systemctl restart xray
+```
+
+Alpine 实际执行的服务操作相当于：
+
+```bash
+rc-update add xray default
+rc-service xray restart
+```
+
+检查服务状态：
+
+```bash
+systemctl status xray       # Debian/Ubuntu
+rc-service xray status      # Alpine
+```
 
 ## 卸载和恢复
 
