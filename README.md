@@ -85,12 +85,15 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 ### IP 模式
 
 ```text
-dual   双栈监听，出站 IPv6 优先，失败回落 IPv4
-ipv4   仅 IPv4
-ipv6   仅 IPv6
+UseIPv6v4  双栈监听，IPv6 优先，失败回落 IPv4
+UseIPv4    仅 IPv4
+UseIPv6    仅 IPv6
+AsIs       Xray 默认，不强制指定地址族
 ```
 
-双栈模式会使用 `UseIPv6v4`，监听地址为 `::`。这里控制的是 Xray 的监听和出站解析策略；客户端设备本身是否优先 IPv6，还取决于客户端系统、DNS 和网络运营商。
+脚本菜单中的第 4 项 `AsIs` 使用 Xray 内核默认策略，监听地址仍为 `::`，域名解析交给系统/Go 网络栈处理。这里控制的是 Xray 的监听和出站解析策略；客户端设备本身是否优先 IPv6，还取决于客户端系统、DNS 和网络运营商。
+
+这些名称对应 Xray `freedom` 出站的 `domainStrategy` 配置项。`UseIPv6v4` 表示 IPv6 优先、IPv4 回落；`UseIPv4` 和 `UseIPv6` 分别限制为单一地址族。
 
 ## 节点信息和二维码
 

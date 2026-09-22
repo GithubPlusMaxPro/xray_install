@@ -339,17 +339,26 @@ normalize_target() {
 
 choose_ip_mode() {
     default_mode=$1
+    case "$default_mode" in
+        dual|UseIPv6v4) default_choice=1 ;;
+        ipv4|UseIPv4) default_choice=2 ;;
+        ipv6|UseIPv6) default_choice=3 ;;
+        AsIs|'') default_choice=4 ;;
+        *) default_choice=4 ;;
+    esac
     printf '%s\n' \
         'IP 模式:' \
-        '  1) dual  双栈，IPv6 优先，失败回落 IPv4' \
-        '  2) ipv4  仅 IPv4' \
-        '  3) ipv6  仅 IPv6' > /dev/tty
-    choice=$(prompt_input '请选择' "$default_mode")
+        '  1) UseIPv6v4  双栈，IPv6 优先，失败回落 IPv4' \
+        '  2) UseIPv4    仅 IPv4' \
+        '  3) UseIPv6    仅 IPv6' \
+        '  4) AsIs       Xray 默认，不强制指定地址族' > /dev/tty
+    choice=$(prompt_input '请选择' "$default_choice")
     case "$choice" in
-        1|dual) IP_MODE=dual; LISTEN_ADDR=::; DOMAIN_STRATEGY=UseIPv6v4 ;;
-        2|ipv4) IP_MODE=ipv4; LISTEN_ADDR=0.0.0.0; DOMAIN_STRATEGY=UseIPv4 ;;
-        3|ipv6) IP_MODE=ipv6; LISTEN_ADDR=::; DOMAIN_STRATEGY=UseIPv6 ;;
-        *) die "IP 模式只能选择 1、2、3、dual 或 ipv4/ipv6。" ;;
+        1|UseIPv6v4) IP_MODE=UseIPv6v4; LISTEN_ADDR=::; DOMAIN_STRATEGY=UseIPv6v4 ;;
+        2|UseIPv4) IP_MODE=UseIPv4; LISTEN_ADDR=0.0.0.0; DOMAIN_STRATEGY=UseIPv4 ;;
+        3|UseIPv6) IP_MODE=UseIPv6; LISTEN_ADDR=::; DOMAIN_STRATEGY=UseIPv6 ;;
+        4|AsIs) IP_MODE=AsIs; LISTEN_ADDR=::; DOMAIN_STRATEGY=AsIs ;;
+        *) die "IP 模式只能选择 1、2、3、4，或输入 Xray 的 domainStrategy 名称。" ;;
     esac
 }
 
@@ -557,7 +566,8 @@ configure_vless() {
     old_short_id=$(get_vless_short_id)
     old_address=$(get_node_field vless address)
     old_mode=$(get_node_field vless ipMode)
-    [ -n "$old_mode" ] || old_mode=dual
+    [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
+    [ -n "$old_mode" ] || old_mode=AsIs
 
     echo
     echo '=== 配置/修改 VLESS Reality ==='
@@ -624,7 +634,8 @@ configure_ss() {
     old_password=$(get_ss_field password)
     old_address=$(get_node_field ss2022 address)
     old_mode=$(get_node_field ss2022 ipMode)
-    [ -n "$old_mode" ] || old_mode=dual
+    [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
+    [ -n "$old_mode" ] || old_mode=AsIs
 
     echo
     echo '=== 配置/修改 Shadowsocks 2022 ==='
