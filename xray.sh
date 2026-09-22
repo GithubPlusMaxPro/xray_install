@@ -50,44 +50,61 @@ detect_os() {
         debian|ubuntu) OS=debian ;;
         *) die "只支持 Debian/Ubuntu 和 Alpine，检测到: ${ID:-unknown}" ;;
     esac
+    info "检测到系统: ${PRETTY_NAME:-$ID}（${OS} 服务管理）"
 }
 
 install_dependencies() {
+    info "检查并安装系统依赖，请稍候..."
     if [ "$OS" = alpine ]; then
+        info "使用 apk 安装 curl、tar、openssl、ca-certificates 和 jq"
         apk add --no-cache curl tar openssl ca-certificates jq >/dev/null
         # qrencode is optional; some Alpine releases provide it as a community subpackage.
+        info "尝试安装终端二维码工具 qrencode（可选）"
         apk add --no-cache libqrencode-tools >/dev/null 2>&1 || true
     else
         export DEBIAN_FRONTEND=noninteractive
+        info "使用 apt 更新软件包索引"
         apt-get update -qq
+        info "使用 apt 安装 curl、tar、openssl、ca-certificates、jq 和 qrencode"
         apt-get install -y -qq curl tar openssl ca-certificates jq qrencode >/dev/null
     fi
+    info "系统依赖已准备完成"
 }
 
 install_xray() {
-    [ -x "$XRAY_BIN" ] && return
+    if [ -x "$XRAY_BIN" ]; then
+        info "已找到 Xray 内核: $XRAY_BIN，跳过下载"
+        return
+    fi
 
     temp_dir=$(mktemp -d)
     trap 'rm -rf "$temp_dir"' EXIT HUP INT TERM
     if [ "$OS" = alpine ]; then
         info "安装 Xray Alpine/OpenRC 版本"
-        curl -fsSL --retry 3 \
+        info "正在从 GitHub 下载 Xray 安装程序..."
+        curl -fL --retry 3 --progress-bar \
             https://github.com/XTLS/Xray-install/raw/main/alpinelinux/install-release.sh \
             -o "$temp_dir/install-release.sh"
+        info "正在执行 Xray Alpine 安装程序..."
         sh "$temp_dir/install-release.sh"
     else
         info "安装 Xray systemd 版本"
-        curl -fsSL --retry 3 \
+        info "正在从 GitHub 下载 Xray 安装程序..."
+        curl -fL --retry 3 --progress-bar \
             https://github.com/XTLS/Xray-install/raw/main/install-release.sh \
             -o "$temp_dir/install-release.sh"
+        info "正在执行 Xray Debian/Ubuntu 安装程序..."
         bash "$temp_dir/install-release.sh" install
     fi
     [ -x "$XRAY_BIN" ] || die "Xray 安装失败，找不到 $XRAY_BIN"
+    info "Xray 内核安装完成: $XRAY_BIN"
 }
 
 ensure_base_files() {
+    info "检查 Xray 配置和节点信息文件"
     mkdir -p "$XRAY_DIR"
     if [ ! -f "$CONFIG_FILE" ]; then
+        info "创建基础配置: $CONFIG_FILE"
         cat > "$CONFIG_FILE" <<'EOF'
 {
   "log": {
@@ -111,10 +128,12 @@ EOF
     jq empty "$CONFIG_FILE" >/dev/null 2>&1 || die "现有 Xray 配置不是有效 JSON: $CONFIG_FILE"
 
     if [ ! -f "$NODES_FILE" ]; then
+        info "创建节点信息文件: $NODES_FILE"
         printf '%s\n' '{}' > "$NODES_FILE"
         chmod 600 "$NODES_FILE"
     fi
     jq empty "$NODES_FILE" >/dev/null 2>&1 || die "节点信息文件不是有效 JSON: $NODES_FILE"
+    info "基础文件检查完成"
 }
 
 get_node_field() {
@@ -414,6 +433,7 @@ write_config() {
 }
 
 restart_xray() {
+    info "启用 Xray 开机自启并重启服务"
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         systemctl daemon-reload
         systemctl enable xray >/dev/null 2>&1 || true
@@ -424,7 +444,7 @@ restart_xray() {
     else
         die "找不到 systemd 或 OpenRC。"
     fi
-    echo "Xray 已重启。"
+    echo "Xray 已重启，开机自启已启用。"
 }
 
 stop_xray() {

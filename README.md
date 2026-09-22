@@ -29,6 +29,8 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 
 脚本会自动安装 Xray 和必要依赖。它不会自动创建任何 VLESS 或 SS2022 入站，只有在菜单中完成对应协议的配置并保存后，才会写入配置文件。
 
+首次运行时，终端会打印当前进度，包括系统检测、依赖安装、Xray 下载与安装、配置初始化和服务启动。下载 Xray 时会显示进度条。
+
 ## 交互菜单
 
 运行 `sh xray.sh` 后显示：
