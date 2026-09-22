@@ -184,6 +184,26 @@ get_ss_field() {
     fi
 }
 
+detect_server_address() {
+    detected_address=
+    if command -v ip >/dev/null 2>&1; then
+        detected_address=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
+        if [ -z "$detected_address" ]; then
+            detected_address=$(ip -6 route get 2606:4700:4700::1111 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
+        fi
+        if [ -z "$detected_address" ]; then
+            detected_address=$(ip -o -4 addr show scope global 2>/dev/null | awk '{sub(/\/.*$/, "", $4); print $4; exit}')
+        fi
+        if [ -z "$detected_address" ]; then
+            detected_address=$(ip -o -6 addr show scope global 2>/dev/null | awk '{sub(/\/.*$/, "", $4); print $4; exit}')
+        fi
+    fi
+    if [ -z "$detected_address" ] && command -v hostname >/dev/null 2>&1; then
+        detected_address=$(hostname -I 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i !~ /^127\./ && $i != "::1") {print $i; exit}}')
+    fi
+    printf '%s' "$detected_address"
+}
+
 make_ss_url() {
     server_address=$1
     ss_port_value=$2
@@ -605,13 +625,17 @@ configure_vless() {
     old_private=$(get_vless_reality_field privateKey)
     old_short_id=$(get_vless_short_id)
     old_address=$(get_node_field vless address)
+    case "$old_address" in
+        YOUR_SERVER_IP_OR_DOMAIN) old_address= ;;
+    esac
+    detected_address=$(detect_server_address)
     old_mode=$(get_node_field vless ipMode)
     [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
     [ -n "$old_mode" ] || old_mode=AsIs
 
     echo
     echo '=== 配置/修改 VLESS Reality ==='
-    SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于生成客户端参数）' "${old_address:-YOUR_SERVER_IP_OR_DOMAIN}")
+    SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于生成客户端参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
     VLESS_PORT=$(prompt_input 'VLESS 端口' "${old_port:-443}")
     REALITY_TARGET=$(prompt_input 'Reality 伪装目标域名或 HOST:PORT' "${old_target:-www.apple.com:443}")
     REALITY_TARGET=$(normalize_target "$REALITY_TARGET")
@@ -673,13 +697,17 @@ configure_ss() {
     old_method=$(get_ss_field method)
     old_password=$(get_ss_field password)
     old_address=$(get_node_field ss2022 address)
+    case "$old_address" in
+        YOUR_SERVER_IP_OR_DOMAIN) old_address= ;;
+    esac
+    detected_address=$(detect_server_address)
     old_mode=$(get_node_field ss2022 ipMode)
     [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
     [ -n "$old_mode" ] || old_mode=AsIs
 
     echo
     echo '=== 配置/修改 Shadowsocks 2022 ==='
-    SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于节点参数）' "${old_address:-YOUR_SERVER_IP_OR_DOMAIN}")
+    SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于节点参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
     SS_PORT=$(prompt_input 'SS2022 端口' "${old_port:-8388}")
     choose_ss_method "${old_method:-2022-blake3-aes-256-gcm}"
     choose_ip_mode "$old_mode"

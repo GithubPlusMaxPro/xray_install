@@ -56,7 +56,7 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 
 脚本会询问：
 
-- 服务器域名或 IP：只用于生成客户端分享链接
+- 服务器域名或 IP：只用于生成客户端分享链接，默认尝试读取本机网卡地址
 - VLESS 监听端口
 - Reality 伪装目标 `域名` 或 `域名:端口`
 - Reality SNI
@@ -69,7 +69,7 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 
 脚本会询问：
 
-- 服务器域名或 IP：只用于生成客户端分享链接
+- 服务器域名或 IP：只用于生成客户端分享链接，默认尝试读取本机网卡地址
 - SS2022 监听端口
 - 加密方式
 - IP 模式
@@ -196,6 +196,8 @@ sh xray.sh --uninstall --purge --yes
 脚本不会自动修改云防火墙、iptables、nftables 或 UFW。请根据实际配置，在服务器安全组和防火墙中放行 VLESS、SS2022 使用的端口。
 
 如果使用域名生成节点链接，请确认域名解析到了服务器，并且客户端能够访问对应端口。
+
+脚本会优先通过本机路由表读取实际出站网卡地址，再从全局网卡地址兜底。如果服务器位于 NAT 后，自动读取到的可能是 `192.168.x.x`、`10.x.x.x` 等内网地址；公网客户端连接时，请手动改成公网 IP 或域名。
 
 ## 安全提示
 
