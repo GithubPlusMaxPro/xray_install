@@ -226,9 +226,37 @@ is_port() {
 
 is_safe_value() {
     case "$1" in
-        *'"'*|*'\'*|*"$(printf '\n')"*) return 1 ;;
+        *[![:alnum:].:_\[\]-]*) return 1 ;;
     esac
     return 0
+}
+
+is_valid_ipv4_literal() {
+    ipv4_value=$1
+    saved_ifs=$IFS
+    IFS=.
+    # This function is called only after the value has been limited to digits and dots.
+    # shellcheck disable=SC2086
+    set -- $ipv4_value
+    IFS=$saved_ifs
+    [ "$#" -eq 4 ] || return 1
+    for octet in "$@"; do
+        case "$octet" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        [ "$octet" -le 255 ] 2>/dev/null || return 1
+    done
+    return 0
+}
+
+validate_server_address() {
+    server_address_value=$1
+    [ -n "$server_address_value" ] || return 1
+    is_safe_value "$server_address_value" || return 1
+    case "$server_address_value" in
+        *[!0-9.]*) return 0 ;;
+        *) is_valid_ipv4_literal "$server_address_value" ;;
+    esac
 }
 
 prompt_input() {
@@ -535,7 +563,7 @@ configure_vless() {
     FLOW=${old_flow:-xtls-rprx-vision}
 
     is_port "$VLESS_PORT" || die "VLESS 端口无效。"
-    is_safe_value "$SERVER_ADDRESS" || die "服务器地址包含不安全字符。"
+    validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
     is_safe_value "$REALITY_TARGET" || die "Reality 目标包含不安全字符。"
     is_safe_value "$SERVER_NAME" || die "Reality SNI 包含不安全字符。"
 
@@ -587,7 +615,7 @@ configure_ss() {
     choose_ss_method "${old_method:-2022-blake3-aes-256-gcm}"
     choose_ip_mode "$old_mode"
     is_port "$SS_PORT" || die "SS2022 端口无效。"
-    is_safe_value "$SERVER_ADDRESS" || die "服务器地址包含不安全字符。"
+    validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
 
     if [ -n "$old_password" ] && yes_no '保留现有 SS2022 密码' yes; then
         SS_PASSWORD=$old_password
