@@ -42,6 +42,7 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 4) 查看状态
 5) 查看节点和配置摘要
 6) 卸载 Xray（可选择保留备份或清空）
+7) 编辑 Xray 配置文件
 0) 退出
 ```
 
@@ -114,6 +115,7 @@ AsIs       Xray 默认，不强制指定地址族
 sh xray.sh                            # 打开交互菜单
 sh xray.sh --vless                    # 直接配置/修改 VLESS Reality
 sh xray.sh --ss                       # 直接配置/修改 Shadowsocks 2022
+sh xray.sh --edit                     # 编辑并检查 Xray 配置文件
 sh xray.sh --restart                  # 重启 Xray
 sh xray.sh --status                   # 查看 Xray 状态
 sh xray.sh --help                    # 查看帮助
@@ -139,6 +141,8 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 节点文件包含 Reality 私钥和 SS2022 密码，权限为 `600`，不要公开或提交到 Git 仓库。
 
 修改配置时，脚本会先生成临时 JSON 并运行 Xray 配置检查，检查通过后再替换正式配置文件；不会为每次修改自动生成旧配置备份。
+
+也可以通过菜单第 7 项或 `sh xray.sh --edit` 手动编辑完整配置。脚本会先编辑临时文件，只有 Xray 检查通过后才会覆盖正式配置；检查失败时原配置保持不变。编辑器按 `EDITOR`、`vi`、`vim`、`nano` 的顺序选择。
 
 Debian/Ubuntu 使用 systemd 管理服务，Alpine 使用 OpenRC。配置完成后选择立即重启，或运行 `sh xray.sh --restart`，脚本会自动加入开机自启。
 

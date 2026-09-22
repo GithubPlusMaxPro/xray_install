@@ -27,6 +27,7 @@ usage() {
   sh xray.sh                 打开交互管理菜单
   sh xray.sh --vless         直接配置/修改 VLESS Reality
   sh xray.sh --ss            直接配置/修改 Shadowsocks 2022
+  sh xray.sh --edit          编辑并检查 Xray 配置文件
   sh xray.sh --restart       重启 Xray
   sh xray.sh --status        查看 Xray 状态
   sh xray.sh --uninstall     停止并卸载 Xray（会先备份）
@@ -454,6 +455,45 @@ restart_xray() {
     echo "Xray 已重启，开机自启已启用。"
 }
 
+edit_config() {
+    edit_tmp="$CONFIG_FILE.edit.$$.json"
+    cp "$CONFIG_FILE" "$edit_tmp"
+
+    editor=${EDITOR:-}
+    if [ -z "$editor" ] || ! command -v "$editor" >/dev/null 2>&1; then
+        editor=
+        for candidate in vi vim nano; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                editor=$candidate
+                break
+            fi
+        done
+    fi
+    [ -n "$editor" ] || {
+        rm -f "$edit_tmp"
+        die "找不到编辑器，请先安装 vi、vim 或 nano。"
+    }
+
+    info "正在编辑临时配置: $edit_tmp"
+    if ! "$editor" "$edit_tmp"; then
+        rm -f "$edit_tmp"
+        die "编辑器退出失败，正式配置未修改。"
+    fi
+
+    info "检查编辑后的 Xray 配置"
+    if ! "$XRAY_BIN" run -test -format json -config "$edit_tmp"; then
+        rm -f "$edit_tmp"
+        die "配置检查失败，正式配置未修改。"
+    fi
+
+    mv "$edit_tmp" "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+    echo "配置已保存: $CONFIG_FILE"
+    if yes_no '现在重启 Xray 使配置生效' yes; then
+        restart_xray
+    fi
+}
+
 stop_xray() {
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         systemctl disable --now xray >/dev/null 2>&1 || true
@@ -688,6 +728,7 @@ menu() {
             '4) 查看状态' \
             '5) 查看节点和配置摘要' \
             '6) 卸载 Xray（可选择保留备份或清空）' \
+            '7) 编辑 Xray 配置文件' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -698,8 +739,9 @@ menu() {
             4) show_status ;;
             5) show_summary ;;
             6) uninstall_xray ;;
+            7) edit_config ;;
             0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-5。' ;;
+            *) echo '选择无效，请输入 0-7。' ;;
         esac
     done
 }
@@ -710,6 +752,7 @@ main() {
             -h|--help) usage; exit 0 ;;
             --vless) ACTION=vless ;;
             --ss|--ss2022) ACTION=ss ;;
+            --edit) ACTION=edit ;;
             --restart) ACTION=restart ;;
             --status) ACTION=status ;;
             --uninstall) ACTION=uninstall ;;
@@ -735,6 +778,7 @@ main() {
     case "$ACTION" in
         vless) configure_vless ;;
         ss) configure_ss ;;
+        edit) edit_config ;;
         restart) restart_xray ;;
         status) show_status ;;
         '') menu ;;
