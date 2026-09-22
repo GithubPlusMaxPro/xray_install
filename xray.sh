@@ -481,7 +481,7 @@ edit_config() {
     editor=${EDITOR:-}
     if [ -z "$editor" ] || ! command -v "$editor" >/dev/null 2>&1; then
         editor=
-        for candidate in vi vim nano; do
+        for candidate in vim nvim vi nano; do
             if command -v "$candidate" >/dev/null 2>&1; then
                 editor=$candidate
                 break
@@ -494,9 +494,28 @@ edit_config() {
     }
 
     info "正在编辑临时配置: $edit_tmp"
-    if ! "$editor" "$edit_tmp" </dev/tty >/dev/tty; then
+    # Ensure a clean terminal before and after the full-screen editor.
+    stty sane </dev/tty >/dev/tty 2>/dev/null || true
+    case "$editor" in
+        *vim*|*nvim*)
+            if ! "$editor" -N -n -u NONE -U NONE -i NONE "$edit_tmp" </dev/tty >/dev/tty; then
+                rm -f "$edit_tmp"
+                stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                die "编辑器退出失败，正式配置未修改。"
+            fi
+            ;;
+        *)
+            if ! "$editor" "$edit_tmp" </dev/tty >/dev/tty; then
+                rm -f "$edit_tmp"
+                stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                die "编辑器退出失败，正式配置未修改。"
+            fi
+            ;;
+    esac
+    stty sane </dev/tty >/dev/tty 2>/dev/null || true
+    if [ ! -f "$edit_tmp" ]; then
         rm -f "$edit_tmp"
-        die "编辑器退出失败，正式配置未修改。"
+        die "编辑器未生成配置文件，正式配置未修改。"
     fi
 
     info "检查编辑后的 Xray 配置"
