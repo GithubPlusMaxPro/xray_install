@@ -135,11 +135,7 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 
 节点文件包含 Reality 私钥和 SS2022 密码，权限为 `600`，不要公开或提交到 Git 仓库。
 
-每次修改配置前，旧配置会备份为：
-
-```text
-/usr/local/etc/xray/config.json.bak.时间戳
-```
+修改配置时，脚本会先生成临时 JSON 并运行 Xray 配置检查，检查通过后再替换正式配置文件；不会为每次修改自动生成旧配置备份。
 
 Debian/Ubuntu 使用 systemd 管理服务，Alpine 使用 OpenRC。配置完成后选择立即重启，或运行 `sh xray.sh --restart`，脚本会自动加入开机自启。
 

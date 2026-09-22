@@ -425,11 +425,9 @@ write_config() {
 
     info "检查 Xray 配置"
     "$XRAY_BIN" run -test -format json -config "$tmp_config"
-    backup="$CONFIG_FILE.bak.$(date +%Y%m%d%H%M%S)"
-    cp -p "$CONFIG_FILE" "$backup"
     mv "$tmp_config" "$CONFIG_FILE"
     chmod 644 "$CONFIG_FILE"
-    echo "配置已保存，旧配置备份: $backup"
+    echo "配置已保存: $CONFIG_FILE"
 }
 
 restart_xray() {
