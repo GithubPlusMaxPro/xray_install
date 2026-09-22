@@ -9,6 +9,7 @@ XRAY_DIR=${XRAY_DIR:-/usr/local/etc/xray}
 CONFIG_FILE=${CONFIG_FILE:-$XRAY_DIR/config.json}
 NODES_FILE=${NODES_FILE:-/root/xray-nodes.json}
 ACTION=
+ASSUME_YES=0
 
 die() {
     echo "错误: $*" >&2
@@ -27,6 +28,8 @@ usage() {
   sh xray.sh --ss            直接配置/修改 Shadowsocks 2022
   sh xray.sh --restart       重启 Xray
   sh xray.sh --status        查看 Xray 状态
+  sh xray.sh --uninstall     停止并卸载 Xray（会先备份）
+  sh xray.sh --uninstall --yes  无交互确认卸载
 
 首次运行会安装 Xray，并创建基础配置。脚本不会自动修改防火墙规则。
 EOF
@@ -343,6 +346,53 @@ restart_xray() {
     echo "Xray 已重启。"
 }
 
+stop_xray() {
+    if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+        systemctl disable --now xray >/dev/null 2>&1 || true
+    elif command -v rc-service >/dev/null 2>&1; then
+        rc-service xray stop >/dev/null 2>&1 || true
+        rc-update del xray default >/dev/null 2>&1 || true
+    fi
+}
+
+move_to_backup() {
+    source_path=$1
+    [ -e "$source_path" ] || return 0
+    backup_name=$(printf '%s' "$source_path" | sed 's#^/##; s#/#_#g')
+    mv "$source_path" "$UNINSTALL_BACKUP/$backup_name"
+}
+
+uninstall_xray() {
+    if [ "$ASSUME_YES" -ne 1 ]; then
+        yes_no '确定卸载 Xray？配置、日志和节点信息会移动到备份目录' no || {
+            echo '已取消卸载。'
+            return
+        }
+    fi
+
+    UNINSTALL_BACKUP=/root/xray-uninstall-backup-$(date +%Y%m%d%H%M%S)
+    mkdir -p "$UNINSTALL_BACKUP"
+    chmod 700 "$UNINSTALL_BACKUP"
+    stop_xray
+
+    move_to_backup "$XRAY_BIN"
+    move_to_backup "$XRAY_DIR"
+    move_to_backup /usr/local/share/xray
+    move_to_backup /var/log/xray
+    move_to_backup "$NODES_FILE"
+    move_to_backup /etc/systemd/system/xray.service
+    move_to_backup /etc/systemd/system/xray@.service
+    move_to_backup /etc/systemd/system/xray.service.d
+    move_to_backup /etc/init.d/xray
+
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+    echo "Xray 已停止并卸载。"
+    echo "备份目录: $UNINSTALL_BACKUP"
+    echo "系统依赖（curl、openssl、jq 等）未删除。"
+}
+
 show_status() {
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         systemctl --no-pager --full status xray || true
@@ -492,6 +542,7 @@ menu() {
             '3) 重启 Xray' \
             '4) 查看状态' \
             '5) 查看节点和配置摘要' \
+            '6) 卸载 Xray（配置先备份）' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -501,6 +552,7 @@ menu() {
             3) restart_xray ;;
             4) show_status ;;
             5) show_summary ;;
+            6) uninstall_xray ;;
             0|q|Q) exit 0 ;;
             *) echo '选择无效，请输入 0-5。' ;;
         esac
@@ -508,18 +560,28 @@ menu() {
 }
 
 main() {
-    case "${1:-}" in
-        -h|--help) usage; exit 0 ;;
-        --vless) ACTION=vless ;;
-        --ss|--ss2022) ACTION=ss ;;
-        --restart) ACTION=restart ;;
-        --status) ACTION=status ;;
-        '') ;;
-        *) die "未知参数: $1（使用 --help 查看帮助）" ;;
-    esac
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -h|--help) usage; exit 0 ;;
+            --vless) ACTION=vless ;;
+            --ss|--ss2022) ACTION=ss ;;
+            --restart) ACTION=restart ;;
+            --status) ACTION=status ;;
+            --uninstall) ACTION=uninstall ;;
+            --yes|-y) ASSUME_YES=1 ;;
+            *) die "未知参数: $1（使用 --help 查看帮助）" ;;
+        esac
+        shift
+    done
 
     require_root
     detect_os
+
+    if [ "$ACTION" = uninstall ]; then
+        uninstall_xray
+        exit 0
+    fi
+
     install_dependencies
     install_xray
     ensure_base_files

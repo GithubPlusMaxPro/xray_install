@@ -20,6 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 3) 重启 Xray
 4) 查看状态
 5) 查看节点和配置摘要
+6) 卸载 Xray（配置先备份）
 0) 退出
 ```
 
@@ -37,6 +38,8 @@ sh xray.sh --vless         # 直接配置/修改 VLESS Reality
 sh xray.sh --ss            # 直接配置/修改 SS2022
 sh xray.sh --restart       # 重启 Xray
 sh xray.sh --status        # 查看状态
+sh xray.sh --uninstall     # 交互确认后卸载
+sh xray.sh --uninstall --yes  # 无交互确认卸载
 ```
 
 ## 文件位置
@@ -53,5 +56,13 @@ sh xray.sh --status        # 查看状态
 ```text
 /usr/local/etc/xray/config.json.bak.时间戳
 ```
+
+卸载时不会直接删除配置、节点信息和日志，而是移动到：
+
+```text
+/root/xray-uninstall-backup-时间戳/
+```
+
+卸载不会删除系统通用依赖，例如 `curl`、`openssl` 和 `jq`。
 
 脚本不会自动修改云防火墙、iptables、nftables 或 UFW 规则，请自行放行 VLESS 和 SS2022 端口。
