@@ -144,6 +144,8 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 
 也可以通过菜单第 7 项或 `sh xray.sh --edit` 手动编辑完整配置。脚本会先编辑临时文件，只有 Xray 检查通过后才会覆盖正式配置；检查失败时原配置保持不变。编辑器按 `EDITOR`、`vi`、`vim`、`nano` 的顺序选择。
 
+编辑和交互菜单需要可用的 TTY。建议先下载脚本再运行，不要在没有终端的后台任务中使用管道方式启动。
+
 Debian/Ubuntu 使用 systemd 管理服务，Alpine 使用 OpenRC。配置完成后选择立即重启，或运行 `sh xray.sh --restart`，脚本会自动加入开机自启。
 
 Debian/Ubuntu 实际执行的服务操作相当于：

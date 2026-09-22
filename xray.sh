@@ -309,10 +309,8 @@ prompt_input() {
     else
         printf '%s: ' "$prompt_text" > /dev/tty
     fi
-    if IFS= read -r answer < /dev/tty; then
-        :
-    else
-        answer=
+    if ! IFS= read -r answer < /dev/tty; then
+        die "无法从当前终端读取输入，请使用带 TTY 的 SSH 会话，并运行 sh xray.sh。"
     fi
     [ -n "$answer" ] || answer=$default_value
     printf '%s' "$answer"
@@ -496,7 +494,7 @@ edit_config() {
     }
 
     info "正在编辑临时配置: $edit_tmp"
-    if ! "$editor" "$edit_tmp"; then
+    if ! "$editor" "$edit_tmp" </dev/tty >/dev/tty; then
         rm -f "$edit_tmp"
         die "编辑器退出失败，正式配置未修改。"
     fi
@@ -513,6 +511,7 @@ edit_config() {
     if yes_no '现在重启 Xray 使配置生效' yes; then
         restart_xray
     fi
+    echo '编辑完成，已返回管理菜单；输入 0 退出。'
 }
 
 stop_xray() {
