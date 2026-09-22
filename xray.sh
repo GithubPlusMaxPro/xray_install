@@ -55,7 +55,24 @@ detect_os() {
 }
 
 install_dependencies() {
-    info "检查并安装系统依赖，请稍候..."
+    missing_dependencies=
+    for required_command in curl tar openssl jq ip; do
+        if ! command -v "$required_command" >/dev/null 2>&1; then
+            if [ -n "$missing_dependencies" ]; then
+                missing_dependencies="$missing_dependencies, $required_command"
+            else
+                missing_dependencies=$required_command
+            fi
+        fi
+    done
+
+    if [ -z "$missing_dependencies" ]; then
+        info "系统依赖已存在，跳过软件包安装"
+        return
+    fi
+
+    info "缺少依赖: $missing_dependencies"
+    info "开始安装系统依赖，请稍候..."
     if [ "$OS" = alpine ]; then
         info "使用 apk 安装 curl、tar、openssl、ca-certificates、jq 和 iproute2"
         apk add --no-cache curl tar openssl ca-certificates jq iproute2 >/dev/null
