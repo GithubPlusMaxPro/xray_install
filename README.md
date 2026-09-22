@@ -24,7 +24,7 @@ sh xray.sh
 也可以直接运行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/xray.sh | sh
+curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/xray.sh | sh
 ```
 
 脚本会自动安装 Xray 和必要依赖。它不会自动创建任何 VLESS 或 SS2022 入站，只有在菜单中完成对应协议的配置并保存后，才会写入配置文件。
