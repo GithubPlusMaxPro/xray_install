@@ -10,6 +10,7 @@ CONFIG_FILE=${CONFIG_FILE:-$XRAY_DIR/config.json}
 NODES_FILE=${NODES_FILE:-/root/xray-nodes.json}
 ACTION=
 ASSUME_YES=0
+PURGE_DATA=0
 
 die() {
     echo "错误: $*" >&2
@@ -30,6 +31,7 @@ usage() {
   sh xray.sh --status        查看 Xray 状态
   sh xray.sh --uninstall     停止并卸载 Xray（会先备份）
   sh xray.sh --uninstall --yes  无交互确认卸载
+  sh xray.sh --uninstall --purge --yes  无交互卸载并清空配置/日志
 
 首次运行会安装 Xray，并创建基础配置。脚本不会自动修改防火墙规则。
 EOF
@@ -413,34 +415,66 @@ move_to_backup() {
     mv "$source_path" "$UNINSTALL_BACKUP/$backup_name"
 }
 
+remove_data() {
+    source_path=$1
+    [ -e "$source_path" ] || return 0
+    rm -rf "$source_path"
+}
+
 uninstall_xray() {
     if [ "$ASSUME_YES" -ne 1 ]; then
         yes_no '确定卸载 Xray？配置、日志和节点信息会移动到备份目录' no || {
             echo '已取消卸载。'
             return
         }
+        if [ "$PURGE_DATA" -eq 1 ]; then
+            yes_no '确认永久清空配置、节点信息和日志？此操作不可恢复' no || {
+                echo '已取消清空，未执行卸载。'
+                return
+            }
+        else
+            if yes_no '是否清空配置、节点信息和日志？默认保留备份' no; then
+                PURGE_DATA=1
+            fi
+        fi
     fi
 
-    UNINSTALL_BACKUP=/root/xray-uninstall-backup-$(date +%Y%m%d%H%M%S)
-    mkdir -p "$UNINSTALL_BACKUP"
-    chmod 700 "$UNINSTALL_BACKUP"
     stop_xray
 
-    move_to_backup "$XRAY_BIN"
-    move_to_backup "$XRAY_DIR"
-    move_to_backup /usr/local/share/xray
-    move_to_backup /var/log/xray
-    move_to_backup "$NODES_FILE"
-    move_to_backup /etc/systemd/system/xray.service
-    move_to_backup /etc/systemd/system/xray@.service
-    move_to_backup /etc/systemd/system/xray.service.d
-    move_to_backup /etc/init.d/xray
+    if [ "$PURGE_DATA" -eq 1 ]; then
+        remove_data "$XRAY_BIN"
+        remove_data "$XRAY_DIR"
+        remove_data /usr/local/share/xray
+        remove_data /var/log/xray
+        remove_data "$NODES_FILE"
+        remove_data /etc/systemd/system/xray.service
+        remove_data /etc/systemd/system/xray@.service
+        remove_data /etc/systemd/system/xray.service.d
+        remove_data /etc/init.d/xray
+    else
+        UNINSTALL_BACKUP=/root/xray-uninstall-backup-$(date +%Y%m%d%H%M%S)
+        mkdir -p "$UNINSTALL_BACKUP"
+        chmod 700 "$UNINSTALL_BACKUP"
+        move_to_backup "$XRAY_BIN"
+        move_to_backup "$XRAY_DIR"
+        move_to_backup /usr/local/share/xray
+        move_to_backup /var/log/xray
+        move_to_backup "$NODES_FILE"
+        move_to_backup /etc/systemd/system/xray.service
+        move_to_backup /etc/systemd/system/xray@.service
+        move_to_backup /etc/systemd/system/xray.service.d
+        move_to_backup /etc/init.d/xray
+    fi
 
     if command -v systemctl >/dev/null 2>&1; then
         systemctl daemon-reload >/dev/null 2>&1 || true
     fi
     echo "Xray 已停止并卸载。"
-    echo "备份目录: $UNINSTALL_BACKUP"
+    if [ "$PURGE_DATA" -eq 1 ]; then
+        echo "配置、节点信息和日志已清空，无法恢复。"
+    else
+        echo "备份目录: $UNINSTALL_BACKUP"
+    fi
     echo "系统依赖（curl、openssl、jq 等）未删除。"
 }
 
@@ -596,7 +630,7 @@ menu() {
             '3) 重启 Xray' \
             '4) 查看状态' \
             '5) 查看节点和配置摘要' \
-            '6) 卸载 Xray（配置先备份）' \
+            '6) 卸载 Xray（可选择保留备份或清空）' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -622,6 +656,7 @@ main() {
             --restart) ACTION=restart ;;
             --status) ACTION=status ;;
             --uninstall) ACTION=uninstall ;;
+            --purge) PURGE_DATA=1 ;;
             --yes|-y) ASSUME_YES=1 ;;
             *) die "未知参数: $1（使用 --help 查看帮助）" ;;
         esac

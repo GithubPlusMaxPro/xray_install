@@ -44,6 +44,7 @@ sh xray.sh --restart       # 重启 Xray
 sh xray.sh --status        # 查看状态
 sh xray.sh --uninstall     # 交互确认后卸载
 sh xray.sh --uninstall --yes  # 无交互确认卸载
+sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空配置/日志
 ```
 
 ## 文件位置
@@ -61,11 +62,13 @@ sh xray.sh --uninstall --yes  # 无交互确认卸载
 /usr/local/etc/xray/config.json.bak.时间戳
 ```
 
-卸载时不会直接删除配置、节点信息和日志，而是移动到：
+普通卸载时不会直接删除配置、节点信息和日志，而是移动到：
 
 ```text
 /root/xray-uninstall-backup-时间戳/
 ```
+
+交互卸载时可以选择是否清空。选择清空后，配置、节点信息和日志将永久删除，无法恢复。
 
 卸载不会删除系统通用依赖，例如 `curl`、`openssl` 和 `jq`。
 
