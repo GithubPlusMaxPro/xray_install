@@ -108,6 +108,75 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 sh xray.sh --restart
 ```
 
+也可以直接使用系统服务命令：
+
+Debian/Ubuntu：
+
+```bash
+systemctl restart xray
+systemctl status xray
+```
+
+Alpine：
+
+```bash
+rc-service xray restart
+rc-service xray status
+```
+
+配置完成后脚本会自动设置开机启动：
+
+- Debian/Ubuntu 使用 `systemd`，服务名是 `xray`。
+- Alpine 使用 `OpenRC`，服务名是 `xray`。
+
+如果需要手动设置开机启动：
+
+Debian/Ubuntu：
+
+```bash
+systemctl enable xray
+```
+
+Alpine：
+
+```bash
+rc-update add xray default
+```
+
+### 查看运行进程
+
+```bash
+ps -ef | grep '[x]ray'
+```
+
+正常运行时，可以看到 `/usr/local/bin/xray` 进程。
+
+两个系统实际启动的程序都是 Xray，启动方式不同：
+
+- Debian/Ubuntu：`/usr/local/bin/xray run -config /usr/local/etc/xray/config.json`
+- Alpine：`/usr/local/bin/xray run -confdir /usr/local/etc/xray/`
+
+查看端口是否正在监听：
+
+```bash
+ss -lntup | grep xray
+```
+
+### 查看日志
+
+Debian/Ubuntu 还可以查看服务日志：
+
+```bash
+journalctl -u xray -f
+```
+
+通用日志文件：
+
+```bash
+tail -f /var/log/xray/error.log
+tail -f /var/log/xray/access.log
+```
+
 ### 查看状态
 
 选择菜单 `4`，或执行：
@@ -146,7 +215,28 @@ sh xray.sh --ss
 sh xray.sh --hy2
 ```
 
-## 八、卸载
+## 八、文件位置
+
+常用文件如下：
+
+```text
+/usr/local/bin/xray              Xray 主程序
+/usr/local/etc/xray/config.json  Xray 配置文件
+/root/xray-nodes.json            节点信息和分享链接
+/var/log/xray/access.log         访问日志
+/var/log/xray/error.log          错误日志
+```
+
+服务文件位置：
+
+```text
+/etc/systemd/system/xray.service   Debian/Ubuntu
+/etc/init.d/xray                   Alpine
+```
+
+节点信息包含密码和密钥，请不要公开或上传到 GitHub。
+
+## 九、卸载
 
 执行：
 
@@ -161,11 +251,23 @@ sh xray.sh --uninstall
 
 建议第一次卸载时选择保留，方便以后恢复。选择清空后无法恢复。
 
-## 九、开机启动
+选择保留时，文件会移动到下面的备份目录：
+
+```text
+/root/xray-uninstall-backup-YYYYMMDDHHMMSS/
+```
+
+如果确定不要任何数据，可以执行：
+
+```bash
+sh xray.sh --uninstall --purge --yes
+```
+
+## 十、开机启动
 
 配置完成并重启后，Xray 会加入系统开机启动。服务器重启后会自动运行。
 
-## 十、更新脚本
+## 十一、更新脚本
 
 重新下载即可：
 
@@ -174,7 +276,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 chmod +x xray.sh
 ```
 
-## 十一、端口检查
+## 十二、端口检查
 
 如果客户端无法连接，请检查：
 
