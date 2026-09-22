@@ -46,6 +46,8 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 0) 退出
 ```
 
+新版使用 `0` 退出，同时兼容旧版菜单的 `8` 退出输入。
+
 配置完成后，脚本会询问是否立即重启 Xray。也可以稍后从菜单选择“重启 Xray”。
 
 再次配置同一协议时，已有参数会作为默认值，可以修改端口、域名、加密方式和 IP 模式。配置另一个协议不会删除已经保存的协议。

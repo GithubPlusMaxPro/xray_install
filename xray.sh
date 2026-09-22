@@ -768,8 +768,8 @@ menu() {
             5) show_summary ;;
             6) uninstall_xray ;;
             7) edit_config ;;
-            0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-7。' ;;
+            0|8|q|Q) exit 0 ;;
+            *) echo '选择无效，请输入 0-7（旧版菜单也可输入 8 退出）。' ;;
         esac
     done
 }
