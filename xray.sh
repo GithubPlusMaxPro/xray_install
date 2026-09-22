@@ -57,8 +57,8 @@ detect_os() {
 install_dependencies() {
     info "检查并安装系统依赖，请稍候..."
     if [ "$OS" = alpine ]; then
-        info "使用 apk 安装 curl、tar、openssl、ca-certificates 和 jq"
-        apk add --no-cache curl tar openssl ca-certificates jq >/dev/null
+        info "使用 apk 安装 curl、tar、openssl、ca-certificates、jq 和 iproute2"
+        apk add --no-cache curl tar openssl ca-certificates jq iproute2 >/dev/null
         # qrencode is optional; some Alpine releases provide it as a community subpackage.
         info "尝试安装终端二维码工具 qrencode（可选）"
         apk add --no-cache libqrencode-tools >/dev/null 2>&1 || true
@@ -66,8 +66,8 @@ install_dependencies() {
         export DEBIAN_FRONTEND=noninteractive
         info "使用 apt 更新软件包索引"
         apt-get update -qq
-        info "使用 apt 安装 curl、tar、openssl、ca-certificates、jq 和 qrencode"
-        apt-get install -y -qq curl tar openssl ca-certificates jq qrencode >/dev/null
+        info "使用 apt 安装 curl、tar、openssl、ca-certificates、jq、qrencode 和 iproute2"
+        apt-get install -y -qq curl tar openssl ca-certificates jq qrencode iproute2 >/dev/null
     fi
     info "系统依赖已准备完成"
 }
@@ -292,6 +292,7 @@ is_valid_ipv4_literal() {
 validate_server_address() {
     server_address_value=$1
     [ -n "$server_address_value" ] || return 1
+    [ "$server_address_value" != YOUR_SERVER_IP_OR_DOMAIN ] || return 1
     is_safe_value "$server_address_value" || return 1
     case "$server_address_value" in
         *[!0-9.]*) return 0 ;;
