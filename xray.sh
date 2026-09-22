@@ -9,6 +9,7 @@ XRAY_DIR=${XRAY_DIR:-/usr/local/etc/xray}
 CONFIG_FILE=${CONFIG_FILE:-$XRAY_DIR/config.json}
 NODES_FILE=${NODES_FILE:-/root/xray-nodes.json}
 ACTION=
+REMOVE_PROTO=
 ASSUME_YES=0
 PURGE_DATA=0
 
@@ -28,6 +29,9 @@ usage() {
   sh xray.sh --vless         直接配置/修改 VLESS Reality
   sh xray.sh --ss            直接配置/修改 Shadowsocks 2022
   sh xray.sh --edit          编辑并检查 Xray 配置文件
+  sh xray.sh --remove        交互选择并删除 VLESS 或 SS2022
+  sh xray.sh --remove-vless  删除 VLESS Reality 入站
+  sh xray.sh --remove-ss     删除 Shadowsocks 2022 入站
   sh xray.sh --restart       重启 Xray
   sh xray.sh --status        查看 Xray 状态
   sh xray.sh --uninstall     停止并卸载 Xray（会先备份）
@@ -550,6 +554,71 @@ edit_config() {
     echo '编辑完成，已返回管理菜单；输入 0 退出。'
 }
 
+remove_protocol() {
+    remove_choice=$REMOVE_PROTO
+    if [ -z "$remove_choice" ]; then
+        printf '%s\n' \
+            '删除协议:' \
+            '  1) VLESS Reality' \
+            '  2) Shadowsocks 2022' \
+            '  0) 取消' > /dev/tty
+        remove_choice=$(prompt_input '请选择' '')
+        case "$remove_choice" in
+            1|vless) remove_choice=vless ;;
+            2|ss|ss2022) remove_choice=ss2022 ;;
+            0|q|Q) echo '已取消删除。'; return 0 ;;
+            *) die '删除选项无效，请输入 1、2 或 0。' ;;
+        esac
+    fi
+
+    case "$remove_choice" in
+        vless)
+            remove_one=vless-reality-in
+            remove_two=vless-in
+            remove_title='VLESS Reality'
+            ;;
+        ss2022)
+            remove_one=ss2022-in
+            remove_two=
+            remove_title='Shadowsocks 2022'
+            ;;
+        *) die "不支持的删除协议: $remove_choice" ;;
+    esac
+
+    yes_no "确认删除 $remove_title？配置和节点信息都会删除" no || {
+        echo '已取消删除。'
+        return 0
+    }
+
+    remove_config_tmp="$CONFIG_FILE.remove.$$.json"
+    remove_nodes_tmp="$NODES_FILE.remove.$$.json"
+    jq --arg remove_one "$remove_one" --arg remove_two "$remove_two" \
+        '.inbounds = ((.inbounds // []) | map(select((.tag // "") != $remove_one and ($remove_two == "" or (.tag // "") != $remove_two))))' \
+        "$CONFIG_FILE" > "$remove_config_tmp" || {
+        rm -f "$remove_config_tmp"
+        die '生成删除后的 Xray 配置失败。'
+    }
+    jq --arg proto "$remove_choice" 'del(.[$proto])' "$NODES_FILE" > "$remove_nodes_tmp" || {
+        rm -f "$remove_config_tmp" "$remove_nodes_tmp"
+        die '生成删除后的节点信息失败。'
+    }
+
+    info "检查删除后的 Xray 配置"
+    if ! "$XRAY_BIN" run -test -format json -config "$remove_config_tmp"; then
+        rm -f "$remove_config_tmp" "$remove_nodes_tmp"
+        die '配置检查失败，未删除任何内容。'
+    fi
+
+    mv "$remove_config_tmp" "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+    mv "$remove_nodes_tmp" "$NODES_FILE"
+    chmod 600 "$NODES_FILE"
+    echo "$remove_title 已删除。"
+    if yes_no '现在重启 Xray 使配置生效' yes; then
+        restart_xray
+    fi
+}
+
 stop_xray() {
     if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
         systemctl disable --now xray >/dev/null 2>&1 || true
@@ -793,6 +862,7 @@ menu() {
             '5) 查看节点和配置摘要' \
             '6) 卸载 Xray（可选择保留备份或清空）' \
             '7) 编辑 Xray 配置文件' \
+            '8) 删除 VLESS Reality 或 Shadowsocks 2022' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -804,8 +874,9 @@ menu() {
             5) show_summary ;;
             6) uninstall_xray ;;
             7) edit_config ;;
-            0|8|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-7（旧版菜单也可输入 8 退出）。' ;;
+            8) remove_protocol ;;
+            0|q|Q) exit 0 ;;
+            *) echo '选择无效，请输入 0-8。' ;;
         esac
     done
 }
@@ -817,6 +888,9 @@ main() {
             --vless) ACTION=vless ;;
             --ss|--ss2022) ACTION=ss ;;
             --edit) ACTION=edit ;;
+            --remove) ACTION=remove ;;
+            --remove-vless) ACTION=remove; REMOVE_PROTO=vless ;;
+            --remove-ss|--remove-ss2022) ACTION=remove; REMOVE_PROTO=ss2022 ;;
             --restart) ACTION=restart ;;
             --status) ACTION=status ;;
             --uninstall) ACTION=uninstall ;;
@@ -843,6 +917,7 @@ main() {
         vless) configure_vless ;;
         ss) configure_ss ;;
         edit) edit_config ;;
+        remove) remove_protocol ;;
         restart) restart_xray ;;
         status) show_status ;;
         '') menu ;;

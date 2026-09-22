@@ -43,10 +43,9 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 5) 查看节点和配置摘要
 6) 卸载 Xray（可选择保留备份或清空）
 7) 编辑 Xray 配置文件
+8) 删除 VLESS Reality 或 Shadowsocks 2022
 0) 退出
 ```
-
-新版使用 `0` 退出，同时兼容旧版菜单的 `8` 退出输入。
 
 配置完成后，脚本会询问是否立即重启 Xray。也可以稍后从菜单选择“重启 Xray”。
 
@@ -118,6 +117,9 @@ sh xray.sh                            # 打开交互菜单
 sh xray.sh --vless                    # 直接配置/修改 VLESS Reality
 sh xray.sh --ss                       # 直接配置/修改 Shadowsocks 2022
 sh xray.sh --edit                     # 编辑并检查 Xray 配置文件
+sh xray.sh --remove                   # 交互选择并删除 VLESS 或 SS2022
+sh xray.sh --remove-vless             # 删除 VLESS Reality 入站
+sh xray.sh --remove-ss                # 删除 Shadowsocks 2022 入站
 sh xray.sh --restart                  # 重启 Xray
 sh xray.sh --status                   # 查看 Xray 状态
 sh xray.sh --help                    # 查看帮助
@@ -145,6 +147,8 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 修改配置时，脚本会先生成临时 JSON 并运行 Xray 配置检查，检查通过后再替换正式配置文件；不会为每次修改自动生成旧配置备份。
 
 也可以通过菜单第 7 项或 `sh xray.sh --edit` 手动编辑完整配置。脚本会先编辑临时文件，只有 Xray 检查通过后才会覆盖正式配置；检查失败时原配置保持不变。编辑器按 `EDITOR`、`vi`、`vim`、`nano` 的顺序选择。
+
+菜单第 8 项可以单独删除 VLESS Reality 或 Shadowsocks 2022。删除操作会同步移除对应入站和节点信息，不会影响另一个协议；删除前需要确认，删除后可以选择重启 Xray。
 
 编辑和交互菜单需要可用的 TTY。建议先下载脚本再运行，不要在没有终端的后台任务中使用管道方式启动。
 
