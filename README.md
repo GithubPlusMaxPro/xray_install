@@ -30,6 +30,10 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 
 配置成功后会询问是否立即重启，也可以随时从菜单选择“重启 Xray”。
 
+配置成功后，终端会显示 v2rayN 可导入的分享字符串，并尝试直接显示终端二维码，不写入二维码图片或字符串文件。
+
+菜单中的“查看节点和配置摘要”也会重新显示字符串和二维码。
+
 ## 直接操作
 
 ```bash

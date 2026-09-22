@@ -53,10 +53,12 @@ detect_os() {
 install_dependencies() {
     if [ "$OS" = alpine ]; then
         apk add --no-cache curl tar openssl ca-certificates jq >/dev/null
+        # qrencode is optional; some Alpine releases provide it as a community subpackage.
+        apk add --no-cache libqrencode-tools >/dev/null 2>&1 || true
     else
         export DEBIAN_FRONTEND=noninteractive
         apt-get update -qq
-        apt-get install -y -qq curl tar openssl ca-certificates jq >/dev/null
+        apt-get install -y -qq curl tar openssl ca-certificates jq qrencode >/dev/null
     fi
 }
 
@@ -158,6 +160,55 @@ get_ss_field() {
             'first(.inbounds[]? | select(.tag == "ss2022-in") | .settings[$field]) // empty' \
             "$CONFIG_FILE"
     fi
+}
+
+make_ss_url() {
+    server_address=$1
+    ss_port_value=$2
+    ss_method_value=$3
+    ss_password_value=$4
+    ss_host=$server_address
+    case "$ss_host" in
+        *:*) ss_host="[$ss_host]" ;;
+    esac
+    ss_userinfo=$(printf '%s' "$ss_method_value:$ss_password_value" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+    SS_URL="ss://$ss_userinfo@$ss_host:$ss_port_value#ss2022"
+}
+
+show_terminal_qr() {
+    node_name=$1
+    node_payload=$2
+    if command -v qrencode >/dev/null 2>&1; then
+        echo "终端二维码 [$node_name]:"
+        qrencode -t ANSIUTF8 "$node_payload" 2>/dev/null || qrencode -t UTF8 "$node_payload" 2>/dev/null || true
+    else
+        echo "未找到 qrencode，无法显示终端二维码。"
+        echo "v2rayN 字符串仍已在上方显示。"
+    fi
+}
+
+show_vless_node() {
+    node_url=$(get_node_field vless url)
+    [ -n "$node_url" ] || return 0
+    echo
+    echo '=== VLESS Reality 节点 ==='
+    echo "$node_url"
+    show_terminal_qr vless-reality "$node_url"
+}
+
+show_ss_node() {
+    node_address=$(get_node_field ss2022 address)
+    node_port=$(get_node_field ss2022 port)
+    node_method=$(get_node_field ss2022 method)
+    node_password=$(get_node_field ss2022 password)
+    [ -n "$node_address" ] && [ -n "$node_port" ] && [ -n "$node_method" ] && [ -n "$node_password" ] || return 0
+    make_ss_url "$node_address" "$node_port" "$node_method" "$node_password"
+    echo
+    echo '=== Shadowsocks 2022 节点 ==='
+    echo "$SS_URL"
+    echo "加密方式: $node_method"
+    echo "密码: $node_password"
+    show_terminal_qr ss2022 "$SS_URL"
 }
 
 get_vless_short_id() {
@@ -409,9 +460,8 @@ show_summary() {
     echo "出站 IP 策略: $(get_domain_strategy)"
     echo "配置文件: $CONFIG_FILE"
     echo "节点参数: $NODES_FILE"
-    if [ -s "$NODES_FILE" ]; then
-        jq . "$NODES_FILE"
-    fi
+    show_vless_node
+    show_ss_node
     echo
 }
 
@@ -472,6 +522,7 @@ configure_vless() {
         *:*) client_host="[$client_host]" ;;
     esac
     vless_url="vless://$VLESS_UUID@$client_host:$VLESS_PORT?encryption=none&security=reality&sni=$SERVER_NAME&fp=chrome&pbk=$REALITY_PUBLIC_KEY&sid=$SHORT_ID&type=tcp&flow=$FLOW#vless-reality"
+    show_terminal_qr vless-reality "$vless_url"
     node_json=$(jq -n \
         --arg address "$SERVER_ADDRESS" --arg port "$VLESS_PORT" --arg mode "$IP_MODE" \
         --arg uuid "$VLESS_UUID" --arg flow "$FLOW" --arg sni "$SERVER_NAME" \
@@ -517,10 +568,12 @@ configure_ss() {
         --arg listen "$LISTEN_ADDR" --arg port "$SS_PORT" --arg method "$SS_METHOD" --arg password "$SS_PASSWORD" \
         '{tag:"ss2022-in",listen:$listen,port:($port|tonumber),protocol:"shadowsocks",settings:{method:$method,password:$password,network:"tcp,udp"}}')
     write_config "$inbound_json" ss2022-in ''
+    make_ss_url "$SERVER_ADDRESS" "$SS_PORT" "$SS_METHOD" "$SS_PASSWORD"
+    show_terminal_qr ss2022 "$SS_URL"
     node_json=$(jq -n \
         --arg address "$SERVER_ADDRESS" --arg port "$SS_PORT" --arg mode "$IP_MODE" \
-        --arg method "$SS_METHOD" --arg password "$SS_PASSWORD" \
-        '{address:$address,port:($port|tonumber),ipMode:$mode,method:$method,password:$password}')
+        --arg method "$SS_METHOD" --arg password "$SS_PASSWORD" --arg url "$SS_URL" \
+        '{address:$address,port:($port|tonumber),ipMode:$mode,method:$method,password:$password,url:$url}')
     save_node ss2022 "$node_json"
     echo
     echo 'SS2022 节点参数已保存:'
@@ -528,6 +581,7 @@ configure_ss() {
     echo "端口: $SS_PORT"
     echo "加密: $SS_METHOD"
     echo "密码: $SS_PASSWORD"
+    echo "$SS_URL"
     if yes_no '现在重启 Xray 使配置生效' yes; then
         restart_xray
     fi
