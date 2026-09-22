@@ -1,5 +1,5 @@
 #!/bin/sh
-# Interactive Xray manager for VLESS REALITY and Shadowsocks 2022.
+# Interactive Xray manager for VLESS REALITY, Shadowsocks 2022 and Hysteria2.
 # Supports Debian/Ubuntu (systemd) and Alpine (OpenRC).
 
 set -eu
@@ -28,10 +28,12 @@ usage() {
   sh xray.sh                 打开交互管理菜单
   sh xray.sh --vless         直接配置/修改 VLESS Reality
   sh xray.sh --ss            直接配置/修改 Shadowsocks 2022
+  sh xray.sh --hy2           直接配置/修改 Hysteria2
   sh xray.sh --edit          编辑并检查 Xray 配置文件
-  sh xray.sh --remove        交互选择并删除 VLESS 或 SS2022
+  sh xray.sh --remove        交互选择并删除 VLESS、SS2022 或 Hysteria2
   sh xray.sh --remove-vless  删除 VLESS Reality 入站
   sh xray.sh --remove-ss     删除 Shadowsocks 2022 入站
+  sh xray.sh --remove-hy2    删除 Hysteria2 入站
   sh xray.sh --restart       重启 Xray
   sh xray.sh --status        查看 Xray 状态
   sh xray.sh --uninstall     停止并卸载 Xray（会先备份）
@@ -205,6 +207,31 @@ get_ss_field() {
     fi
 }
 
+get_hy2_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "hysteria2-in" or .tag == "hy2-in") | .[$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_hy2_tls_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "hysteria2-in" or .tag == "hy2-in") | .streamSettings.tlsSettings[$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_hy2_certificate_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "hysteria2-in" or .tag == "hy2-in") | .streamSettings.tlsSettings.certificates[0][$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_hy2_password() {
+    jq -r 'first(.inbounds[]? | select(.tag == "hysteria2-in" or .tag == "hy2-in") | (.streamSettings.hysteriaSettings.auth // .settings.users[0].auth // .settings.clients[0].auth)) // empty' "$CONFIG_FILE"
+}
+
 detect_server_address() {
     detected_address=
     if command -v ip >/dev/null 2>&1; then
@@ -236,6 +263,24 @@ make_ss_url() {
     esac
     ss_userinfo=$(printf '%s' "$ss_method_value:$ss_password_value" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
     SS_URL="ss://$ss_userinfo@$ss_host:$ss_port_value#ss2022"
+}
+
+urlencode() {
+    printf '%s' "$1" | jq -sRr @uri
+}
+
+make_hy2_url() {
+    hy2_host=$1
+    hy2_port_value=$2
+    hy2_password_value=$3
+    hy2_sni_value=$4
+    case "$hy2_host" in
+        \[*\]) : ;;
+        *:*) hy2_host="[$hy2_host]" ;;
+    esac
+    hy2_password_encoded=$(urlencode "$hy2_password_value")
+    hy2_sni_encoded=$(urlencode "$hy2_sni_value")
+    HY2_URL="hysteria2://$hy2_password_encoded@$hy2_host:$hy2_port_value/?sni=$hy2_sni_encoded&alpn=h3#hysteria2"
 }
 
 show_terminal_qr() {
@@ -272,6 +317,24 @@ show_ss_node() {
     echo "加密方式: $node_method"
     echo "密码: $node_password"
     show_terminal_qr ss2022 "$SS_URL"
+}
+
+show_hy2_node() {
+    node_address=$(get_node_field hy2 address)
+    node_port=$(get_node_field hy2 port)
+    node_password=$(get_node_field hy2 password)
+    node_sni=$(get_node_field hy2 sni)
+    node_cert=$(get_node_field hy2 certificateFile)
+    node_key=$(get_node_field hy2 keyFile)
+    [ -n "$node_address" ] && [ -n "$node_port" ] && [ -n "$node_password" ] && [ -n "$node_sni" ] || return 0
+    make_hy2_url "$node_address" "$node_port" "$node_password" "$node_sni"
+    echo
+    echo '=== Hysteria2 节点 ==='
+    echo "$HY2_URL"
+    echo "SNI: $node_sni"
+    echo "证书: $node_cert"
+    echo "私钥: $node_key"
+    show_terminal_qr hysteria2 "$HY2_URL"
 }
 
 get_vless_short_id() {
@@ -561,13 +624,15 @@ remove_protocol() {
             '删除协议:' \
             '  1) VLESS Reality' \
             '  2) Shadowsocks 2022' \
+            '  3) Hysteria2' \
             '  0) 取消' > /dev/tty
         remove_choice=$(prompt_input '请选择' '')
         case "$remove_choice" in
             1|vless) remove_choice=vless ;;
             2|ss|ss2022) remove_choice=ss2022 ;;
+            3|hy2|hysteria2) remove_choice=hy2 ;;
             0|q|Q) echo '已取消删除。'; return 0 ;;
-            *) die '删除选项无效，请输入 1、2 或 0。' ;;
+            *) die '删除选项无效，请输入 1、2、3 或 0。' ;;
         esac
     fi
 
@@ -581,6 +646,11 @@ remove_protocol() {
             remove_one=ss2022-in
             remove_two=
             remove_title='Shadowsocks 2022'
+            ;;
+        hy2)
+            remove_one=hysteria2-in
+            remove_two=hy2-in
+            remove_title='Hysteria2'
             ;;
         *) die "不支持的删除协议: $remove_choice" ;;
     esac
@@ -716,6 +786,7 @@ show_summary() {
     echo "节点参数: $NODES_FILE"
     show_vless_node
     show_ss_node
+    show_hy2_node
     echo
 }
 
@@ -851,6 +922,65 @@ configure_ss() {
     fi
 }
 
+configure_hy2() {
+    old_port=$(get_hy2_field port)
+    old_address=$(get_node_field hy2 address)
+    case "$old_address" in
+        YOUR_SERVER_IP_OR_DOMAIN) old_address= ;;
+    esac
+    detected_address=$(detect_server_address)
+    old_sni=$(get_hy2_tls_field serverName)
+    old_cert=$(get_hy2_certificate_field certificateFile)
+    old_key=$(get_hy2_certificate_field keyFile)
+    old_password=$(get_hy2_password)
+    old_mode=$(get_node_field hy2 ipMode)
+    [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
+    [ -n "$old_mode" ] || old_mode=AsIs
+
+    echo
+    echo '=== 配置/修改 Hysteria2 ==='
+    SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于节点参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
+    HY2_PORT=$(prompt_input 'Hysteria2 UDP 端口' "${old_port:-443}")
+    HY2_SNI=$(prompt_input 'TLS SNI/证书域名' "${old_sni:-$SERVER_ADDRESS}")
+    HY2_CERT_FILE=$(prompt_input 'TLS 证书文件完整路径' "$old_cert")
+    HY2_KEY_FILE=$(prompt_input 'TLS 私钥文件完整路径' "$old_key")
+    HY2_PASSWORD=$(prompt_input 'Hysteria2 密码' "${old_password:-$(openssl rand -hex 16)}")
+    choose_ip_mode "$old_mode"
+
+    is_port "$HY2_PORT" || die "Hysteria2 端口无效。"
+    validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
+    is_safe_value "$HY2_SNI" || die "TLS SNI 包含不支持的字符。"
+    [ -n "$HY2_PASSWORD" ] || die "Hysteria2 密码不能为空。"
+    [ -r "$HY2_CERT_FILE" ] || die "证书文件不可读: $HY2_CERT_FILE"
+    [ -r "$HY2_KEY_FILE" ] || die "私钥文件不可读: $HY2_KEY_FILE"
+
+    inbound_json=$(jq -n \
+        --arg listen "$LISTEN_ADDR" --arg port "$HY2_PORT" --arg password "$HY2_PASSWORD" \
+        --arg sni "$HY2_SNI" --arg cert "$HY2_CERT_FILE" --arg key "$HY2_KEY_FILE" \
+        '{tag:"hysteria2-in",listen:$listen,port:($port|tonumber),protocol:"hysteria",settings:{version:2},streamSettings:{network:"hysteria",security:"tls",tlsSettings:{serverName:$sni,alpn:["h3"],certificates:[{usage:"encipherment",certificateFile:$cert,keyFile:$key}]},hysteriaSettings:{version:2,auth:$password}}}')
+    write_config "$inbound_json" hysteria2-in hy2-in
+    make_hy2_url "$SERVER_ADDRESS" "$HY2_PORT" "$HY2_PASSWORD" "$HY2_SNI"
+    show_terminal_qr hysteria2 "$HY2_URL"
+    node_json=$(jq -n \
+        --arg address "$SERVER_ADDRESS" --arg port "$HY2_PORT" --arg mode "$IP_MODE" \
+        --arg password "$HY2_PASSWORD" --arg sni "$HY2_SNI" \
+        --arg cert "$HY2_CERT_FILE" --arg key "$HY2_KEY_FILE" --arg url "$HY2_URL" \
+        '{address:$address,port:($port|tonumber),ipMode:$mode,password:$password,sni:$sni,certificateFile:$cert,keyFile:$key,url:$url}')
+    save_node hy2 "$node_json"
+    echo
+    echo 'Hysteria2 节点参数已保存:'
+    echo "地址: $SERVER_ADDRESS"
+    echo "端口: $HY2_PORT/UDP"
+    echo "SNI: $HY2_SNI"
+    echo "证书: $HY2_CERT_FILE"
+    echo "私钥: $HY2_KEY_FILE"
+    echo "密码: $HY2_PASSWORD"
+    echo "$HY2_URL"
+    if yes_no '现在重启 Xray 使配置生效' yes; then
+        restart_xray
+    fi
+}
+
 menu() {
     [ -r /dev/tty ] && [ -w /dev/tty ] || die "交互菜单需要可用的终端。"
     while :; do
@@ -862,7 +992,8 @@ menu() {
             '5) 查看节点和配置摘要' \
             '6) 卸载 Xray（可选择保留备份或清空）' \
             '7) 编辑 Xray 配置文件' \
-            '8) 删除 VLESS Reality 或 Shadowsocks 2022' \
+            '8) 删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2' \
+            '9) 配置/修改 Hysteria2' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -875,8 +1006,9 @@ menu() {
             6) uninstall_xray ;;
             7) edit_config ;;
             8) remove_protocol ;;
+            9) configure_hy2 ;;
             0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-8。' ;;
+            *) echo '选择无效，请输入 0-9。' ;;
         esac
     done
 }
@@ -887,10 +1019,12 @@ main() {
             -h|--help) usage; exit 0 ;;
             --vless) ACTION=vless ;;
             --ss|--ss2022) ACTION=ss ;;
+            --hy2|--hysteria2) ACTION=hy2 ;;
             --edit) ACTION=edit ;;
             --remove) ACTION=remove ;;
             --remove-vless) ACTION=remove; REMOVE_PROTO=vless ;;
             --remove-ss|--remove-ss2022) ACTION=remove; REMOVE_PROTO=ss2022 ;;
+            --remove-hy2|--remove-hysteria2) ACTION=remove; REMOVE_PROTO=hy2 ;;
             --restart) ACTION=restart ;;
             --status) ACTION=status ;;
             --uninstall) ACTION=uninstall ;;
@@ -916,6 +1050,7 @@ main() {
     case "$ACTION" in
         vless) configure_vless ;;
         ss) configure_ss ;;
+        hy2) configure_hy2 ;;
         edit) edit_config ;;
         remove) remove_protocol ;;
         restart) restart_xray ;;

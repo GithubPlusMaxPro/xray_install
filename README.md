@@ -4,6 +4,7 @@
 
 - VLESS + REALITY + XTLS Vision
 - Shadowsocks 2022
+- Hysteria2（TLS 证书路径方式）
 - IPv4、IPv6、双栈 IPv6 优先
 - v2rayN 分享链接
 - 终端二维码
@@ -43,7 +44,8 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 5) 查看节点和配置摘要
 6) 卸载 Xray（可选择保留备份或清空）
 7) 编辑 Xray 配置文件
-8) 删除 VLESS Reality 或 Shadowsocks 2022
+8) 删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2
+9) 配置/修改 Hysteria2
 0) 退出
 ```
 
@@ -84,6 +86,27 @@ curl -fL --retry 3 --progress-bar https://raw.githubusercontent.com/GithubPlusMa
 2022-blake3-chacha20-poly1305
 ```
 
+### Hysteria2
+
+脚本使用 Xray 的 `hysteria` 入站协议并固定 `version: 2`。配置时需要填写：
+
+- 服务器域名或 IP：只用于生成客户端分享链接，默认尝试读取本机网卡地址
+- Hysteria2 UDP 端口
+- TLS SNI/证书域名
+- TLS 证书文件完整路径
+- TLS 私钥文件完整路径
+- Hysteria2 密码
+- IP 模式
+
+脚本不会申请、生成或复制证书，只会把你填写的证书路径写入 Xray 配置，并在保存前检查两个文件是否可读。例如：
+
+```text
+/etc/ssl/xray/fullchain.pem
+/etc/ssl/xray/privkey.pem
+```
+
+Hysteria2 使用 UDP/QUIC，服务器防火墙和云安全组必须放行 UDP 端口。
+
 ### IP 模式
 
 ```text
@@ -101,7 +124,7 @@ AsIs       Xray 默认，不强制指定地址族
 
 配置完成后，终端会显示：
 
-- v2rayN 可导入的 `vless://` 或 `ss://` 分享字符串
+- v2rayN/兼容客户端可导入的 `vless://`、`ss://` 或 `hysteria2://` 分享字符串
 - 尝试直接显示的终端二维码
 - VLESS 的公钥、Short ID 等参数
 - SS2022 的加密方式和密码
@@ -116,10 +139,12 @@ AsIs       Xray 默认，不强制指定地址族
 sh xray.sh                            # 打开交互菜单
 sh xray.sh --vless                    # 直接配置/修改 VLESS Reality
 sh xray.sh --ss                       # 直接配置/修改 Shadowsocks 2022
+sh xray.sh --hy2                      # 直接配置/修改 Hysteria2
 sh xray.sh --edit                     # 编辑并检查 Xray 配置文件
-sh xray.sh --remove                   # 交互选择并删除 VLESS 或 SS2022
+sh xray.sh --remove                   # 交互选择并删除 VLESS、SS2022 或 Hysteria2
 sh xray.sh --remove-vless             # 删除 VLESS Reality 入站
 sh xray.sh --remove-ss                # 删除 Shadowsocks 2022 入站
+sh xray.sh --remove-hy2               # 删除 Hysteria2 入站
 sh xray.sh --restart                  # 重启 Xray
 sh xray.sh --status                   # 查看 Xray 状态
 sh xray.sh --help                    # 查看帮助
@@ -148,7 +173,7 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 
 也可以通过菜单第 7 项或 `sh xray.sh --edit` 手动编辑完整配置。脚本会先编辑临时文件，只有 Xray 检查通过后才会覆盖正式配置；检查失败时原配置保持不变。编辑器按 `EDITOR`、`vi`、`vim`、`nano` 的顺序选择。
 
-菜单第 8 项可以单独删除 VLESS Reality 或 Shadowsocks 2022。删除操作会同步移除对应入站和节点信息，不会影响另一个协议；删除前需要确认，删除后可以选择重启 Xray。
+菜单第 8 项可以单独删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2。删除操作会同步移除对应入站和节点信息，不会影响其他协议；删除前需要确认，删除后可以选择重启 Xray。
 
 编辑和交互菜单需要可用的 TTY。建议先下载脚本再运行，不要在没有终端的后台任务中使用管道方式启动。
 
@@ -201,7 +226,7 @@ sh xray.sh --uninstall --purge --yes
 
 ## 防火墙和端口
 
-脚本不会自动修改云防火墙、iptables、nftables 或 UFW。请根据实际配置，在服务器安全组和防火墙中放行 VLESS、SS2022 使用的端口。
+脚本不会自动修改云防火墙、iptables、nftables 或 UFW。请根据实际配置，在服务器安全组和防火墙中放行 VLESS、SS2022 使用的 TCP 端口，以及 Hysteria2 使用的 UDP 端口。
 
 如果使用域名生成节点链接，请确认域名解析到了服务器，并且客户端能够访问对应端口。
 
