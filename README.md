@@ -42,6 +42,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 7) 编辑 Xray 配置文件
 8) 删除节点
 9) 配置/修改 Hysteria2
+10) 设置所有 Freedom 直连出站的 IP 模式
 0) 退出
 ```
 
@@ -51,8 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 2. 按提示填写服务器域名或公网 IP。
 3. 填写端口。
 4. 填写 Reality 伪装目标和 SNI。
-5. 选择 IP 模式。
-6. 按提示确认保存并重启。
+5. 按提示确认保存并重启。
 
 如果已经配置过，再次进入时会自动显示原来的内容，直接回车即可保留。
 
@@ -64,7 +64,6 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 - VLESS 端口
 - Reality 伪装目标
 - Reality SNI
-- IP 模式
 - 是否保留现有 UUID 和 Reality 密钥
 
 如果重新生成 UUID 或 Reality 密钥，已经导入客户端的旧节点需要重新导入。
@@ -75,8 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 2. 填写服务器域名或公网 IP。
 3. 填写端口。
 4. 选择加密方式。
-5. 选择 IP 模式。
-6. 确认保存并重启。
+5. 确认保存并重启。
 
 脚本会自动生成密码，也可以在再次配置时修改密码。
 
@@ -97,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 5. 填写证书完整路径。
 6. 填写私钥完整路径。
 7. 设置密码。
-8. 选择 IP 模式并保存。
+8. 保存并重启。
 
 证书需要提前准备好。例如：
 
@@ -108,18 +106,18 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 
 脚本只读取你填写的证书，不会自动申请证书。使用 Hysteria2 时，要在云服务器安全组和系统防火墙放行对应的 UDP 端口。
 
-## 六、IP 模式
+## 六、出站 IP 模式
 
-配置 VLESS、SS2022 或 Hysteria2 时都会要求选择 IP 模式：
+在菜单选择 `10`，可以单独设置所有 `freedom` 直连出站的域名解析策略。配置 VLESS、SS2022 或 Hysteria2 时不会修改这项设置。该策略控制 Xray 连接目标域名时使用的地址族，不限制节点入站监听地址；脚本创建的入站默认监听 `::`，允许 IPv4 和 IPv6 连接。
 
 ```text
-UseIPv6v4  双栈监听，IPv6 优先，失败回落 IPv4
-UseIPv4    仅 IPv4
-UseIPv6    仅 IPv6
-AsIs       Xray 默认，不强制指定地址族
+UseIPv6v4  优先使用 IPv6 解析结果；无结果时尝试 IPv4
+UseIPv4    使用 IPv4 解析结果
+UseIPv6    使用 IPv6 解析结果
+AsIs       使用 Xray 默认解析方式
 ```
 
-一般双栈服务器选择 `UseIPv6v4`。如果服务器没有 IPv6，选择 `UseIPv4`；只有 IPv6 的服务器选择 `UseIPv6`。
+一般双栈服务器可以选择 `UseIPv6v4`。没有 IPv6 出站能力时选择 `UseIPv4`；只有 IPv6 出站能力时选择 `UseIPv6`。这个选择不会关闭 IPv4 入站。
 
 ## 七、查看节点和二维码
 

@@ -167,7 +167,7 @@ get_node_field() {
 }
 
 get_domain_strategy() {
-    jq -r 'first(.outbounds[]? | select(.protocol == "freedom") | .settings.domainStrategy) // "UseIPv6v4"' "$CONFIG_FILE"
+    jq -r 'first(.outbounds[]? | select(.protocol == "freedom") | (.streamSettings.sockopt.domainStrategy // .settings.domainStrategy)) // "AsIs"' "$CONFIG_FILE"
 }
 
 get_vless_field() {
@@ -441,7 +441,7 @@ normalize_target() {
     esac
 }
 
-choose_ip_mode() {
+choose_outbound_mode() {
     default_mode=$1
     case "$default_mode" in
         dual|UseIPv6v4) default_choice=1 ;;
@@ -451,19 +451,54 @@ choose_ip_mode() {
         *) default_choice=4 ;;
     esac
     printf '%s\n' \
-        'IP 模式:' \
-        '  1) UseIPv6v4  双栈，IPv6 优先，失败回落 IPv4' \
-        '  2) UseIPv4    仅 IPv4' \
-        '  3) UseIPv6    仅 IPv6' \
-        '  4) AsIs       Xray 默认，不强制指定地址族' > /dev/tty
+        '出站域名解析模式:' \
+        '  1) UseIPv6v4  IPv6 优先，IPv4 回落' \
+        '  2) UseIPv4    使用 IPv4 解析结果' \
+        '  3) UseIPv6    使用 IPv6 解析结果' \
+        '  4) AsIs       使用 Xray 默认解析方式' > /dev/tty
     choice=$(prompt_input '请选择' "$default_choice")
     case "$choice" in
-        1|UseIPv6v4) IP_MODE=UseIPv6v4; LISTEN_ADDR=::; DOMAIN_STRATEGY=UseIPv6v4 ;;
-        2|UseIPv4) IP_MODE=UseIPv4; LISTEN_ADDR=0.0.0.0; DOMAIN_STRATEGY=UseIPv4 ;;
-        3|UseIPv6) IP_MODE=UseIPv6; LISTEN_ADDR=::; DOMAIN_STRATEGY=UseIPv6 ;;
-        4|AsIs) IP_MODE=AsIs; LISTEN_ADDR=::; DOMAIN_STRATEGY=AsIs ;;
-        *) die "IP 模式只能选择 1、2、3、4，或输入 Xray 的 domainStrategy 名称。" ;;
+        4|AsIs) DOMAIN_STRATEGY=AsIs ;;
+        1|UseIPv6v4) DOMAIN_STRATEGY=UseIPv6v4 ;;
+        2|UseIPv4) DOMAIN_STRATEGY=UseIPv4 ;;
+        3|UseIPv6) DOMAIN_STRATEGY=UseIPv6 ;;
+        *) die "出站模式选择无效，请输入 1、2、3 或 4。" ;;
     esac
+}
+
+configure_outbound_mode() {
+    old_mode=$(get_domain_strategy)
+    [ -n "$old_mode" ] || old_mode=AsIs
+
+    echo
+    echo '=== 设置所有 Freedom 直连出站的 IP 模式 ==='
+    choose_outbound_mode "$old_mode"
+    tmp_config="$CONFIG_FILE.outbound-mode.$$.json"
+
+    jq --arg strategy "$DOMAIN_STRATEGY" \
+       '.outbounds = (if any(.outbounds[]?; .protocol == "freedom") then
+           (.outbounds | map(if .protocol == "freedom" then
+             .settings = ((.settings // {}) + {domainStrategy: $strategy})
+             | .streamSettings = ((.streamSettings // {}) + {sockopt: ((.streamSettings.sockopt // {}) + {domainStrategy: $strategy})})
+           else . end))
+         else
+           ((.outbounds // []) + [{tag: "direct", protocol: "freedom", settings: {domainStrategy: $strategy}, streamSettings: {sockopt: {domainStrategy: $strategy}}}])
+         end)' "$CONFIG_FILE" > "$tmp_config" || {
+        rm -f "$tmp_config"
+        die '生成出站模式配置失败。'
+    }
+
+    info "检查 Xray 配置"
+    if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+        rm -f "$tmp_config"
+        die '配置检查失败，出站模式未修改。'
+    fi
+    mv "$tmp_config" "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+    echo "所有 Freedom 直连出站的域名解析模式已设为: $DOMAIN_STRATEGY"
+    if yes_no '现在重启 Xray 使配置生效' yes; then
+        restart_xray
+    fi
 }
 
 choose_ss_method() {
@@ -521,7 +556,6 @@ write_config() {
     tmp_config="$CONFIG_FILE.new.$$.json"
 
     jq --argjson inbound "$inbound_json" \
-       --arg strategy "$DOMAIN_STRATEGY" \
        --arg remove_one "$remove_tag_one" \
        --arg remove_two "$remove_tag_two" \
        '.log = ((.log // {}) + {
@@ -531,9 +565,9 @@ write_config() {
         })
         | .inbounds = ((.inbounds // []) | map(select((.tag // "") != $remove_one and (.tag // "") != $remove_two)) + [$inbound])
         | .outbounds = (if any(.outbounds[]?; .protocol == "freedom") then
-            (.outbounds | map(if .protocol == "freedom" then .settings = ((.settings // {}) + {domainStrategy: $strategy}) else . end))
+            .outbounds
           else
-            ((.outbounds // []) + [{tag: "direct", protocol: "freedom", settings: {domainStrategy: $strategy}}])
+            ((.outbounds // []) + [{tag: "direct", protocol: "freedom", settings: {}}])
           end)' "$CONFIG_FILE" > "$tmp_config"
 
     info "检查 Xray 配置"
@@ -805,10 +839,6 @@ configure_vless() {
         YOUR_SERVER_IP_OR_DOMAIN) old_address= ;;
     esac
     detected_address=$(detect_server_address)
-    old_mode=$(get_node_field vless ipMode)
-    [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
-    [ -n "$old_mode" ] || old_mode=AsIs
-
     echo
     echo '=== 配置/修改 VLESS Reality ==='
     SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于生成客户端参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
@@ -816,8 +846,6 @@ configure_vless() {
     REALITY_TARGET=$(prompt_input 'Reality 伪装目标域名或 HOST:PORT' "${old_target:-www.apple.com:443}")
     REALITY_TARGET=$(normalize_target "$REALITY_TARGET")
     SERVER_NAME=$(prompt_input 'Reality SNI' "${old_sni:-$(derive_server_name "$REALITY_TARGET")}")
-    choose_ip_mode "$old_mode"
-
     if [ -n "$old_private" ] && yes_no '保留现有 UUID 和 Reality 密钥' yes; then
         VLESS_UUID=${old_uuid:-$(generate_uuid)}
         REALITY_PRIVATE_KEY=$old_private
@@ -836,7 +864,7 @@ configure_vless() {
     is_safe_value "$SERVER_NAME" || die "Reality SNI 包含不安全字符。"
 
     inbound_json=$(jq -n \
-        --arg listen "$LISTEN_ADDR" \
+        --arg listen "::" \
         --arg port "$VLESS_PORT" \
         --arg uuid "$VLESS_UUID" \
         --arg flow "$FLOW" \
@@ -854,11 +882,11 @@ configure_vless() {
     vless_url="vless://$VLESS_UUID@$client_host:$VLESS_PORT?encryption=none&security=reality&sni=$SERVER_NAME&fp=chrome&pbk=$REALITY_PUBLIC_KEY&sid=$SHORT_ID&type=tcp&flow=$FLOW#vless-reality"
     show_terminal_qr vless-reality "$vless_url"
     node_json=$(jq -n \
-        --arg address "$SERVER_ADDRESS" --arg port "$VLESS_PORT" --arg mode "$IP_MODE" \
+        --arg address "$SERVER_ADDRESS" --arg port "$VLESS_PORT" \
         --arg uuid "$VLESS_UUID" --arg flow "$FLOW" --arg sni "$SERVER_NAME" \
         --arg target "$REALITY_TARGET" --arg public_key "$REALITY_PUBLIC_KEY" \
         --arg private_key "$REALITY_PRIVATE_KEY" --arg short_id "$SHORT_ID" --arg url "$vless_url" \
-        '{address:$address,port:($port|tonumber),ipMode:$mode,uuid:$uuid,flow:$flow,sni:$sni,target:$target,publicKey:$public_key,privateKey:$private_key,shortId:$short_id,url:$url}')
+        '{address:$address,port:($port|tonumber),uuid:$uuid,flow:$flow,sni:$sni,target:$target,publicKey:$public_key,privateKey:$private_key,shortId:$short_id,url:$url}')
     save_node vless "$node_json"
     echo
     echo 'VLESS 节点参数已保存:'
@@ -877,16 +905,11 @@ configure_ss() {
         YOUR_SERVER_IP_OR_DOMAIN) old_address= ;;
     esac
     detected_address=$(detect_server_address)
-    old_mode=$(get_node_field ss2022 ipMode)
-    [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
-    [ -n "$old_mode" ] || old_mode=AsIs
-
     echo
     echo '=== 配置/修改 Shadowsocks 2022 ==='
     SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于节点参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
     SS_PORT=$(prompt_input 'SS2022 端口' "${old_port:-8388}")
     choose_ss_method "${old_method:-2022-blake3-aes-256-gcm}"
-    choose_ip_mode "$old_mode"
     is_port "$SS_PORT" || die "SS2022 端口无效。"
     validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
 
@@ -900,15 +923,15 @@ configure_ss() {
     fi
 
     inbound_json=$(jq -n \
-        --arg listen "$LISTEN_ADDR" --arg port "$SS_PORT" --arg method "$SS_METHOD" --arg password "$SS_PASSWORD" \
+        --arg listen "::" --arg port "$SS_PORT" --arg method "$SS_METHOD" --arg password "$SS_PASSWORD" \
         '{tag:"ss2022-in",listen:$listen,port:($port|tonumber),protocol:"shadowsocks",settings:{method:$method,password:$password,network:"tcp,udp"}}')
     write_config "$inbound_json" ss2022-in ''
     make_ss_url "$SERVER_ADDRESS" "$SS_PORT" "$SS_METHOD" "$SS_PASSWORD"
     show_terminal_qr ss2022 "$SS_URL"
     node_json=$(jq -n \
-        --arg address "$SERVER_ADDRESS" --arg port "$SS_PORT" --arg mode "$IP_MODE" \
+        --arg address "$SERVER_ADDRESS" --arg port "$SS_PORT" \
         --arg method "$SS_METHOD" --arg password "$SS_PASSWORD" --arg url "$SS_URL" \
-        '{address:$address,port:($port|tonumber),ipMode:$mode,method:$method,password:$password,url:$url}')
+        '{address:$address,port:($port|tonumber),method:$method,password:$password,url:$url}')
     save_node ss2022 "$node_json"
     echo
     echo 'SS2022 节点参数已保存:'
@@ -933,10 +956,6 @@ configure_hy2() {
     old_cert=$(get_hy2_certificate_field certificateFile)
     old_key=$(get_hy2_certificate_field keyFile)
     old_password=$(get_hy2_password)
-    old_mode=$(get_node_field hy2 ipMode)
-    [ -n "$old_mode" ] || old_mode=$(get_domain_strategy)
-    [ -n "$old_mode" ] || old_mode=AsIs
-
     echo
     echo '=== 配置/修改 Hysteria2 ==='
     SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于节点参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
@@ -945,7 +964,6 @@ configure_hy2() {
     HY2_CERT_FILE=$(prompt_input 'TLS 证书文件完整路径' "$old_cert")
     HY2_KEY_FILE=$(prompt_input 'TLS 私钥文件完整路径' "$old_key")
     HY2_PASSWORD=$(prompt_input 'Hysteria2 密码' "${old_password:-$(openssl rand -hex 16)}")
-    choose_ip_mode "$old_mode"
 
     is_port "$HY2_PORT" || die "Hysteria2 端口无效。"
     validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
@@ -955,17 +973,17 @@ configure_hy2() {
     [ -r "$HY2_KEY_FILE" ] || die "私钥文件不可读: $HY2_KEY_FILE"
 
     inbound_json=$(jq -n \
-        --arg listen "$LISTEN_ADDR" --arg port "$HY2_PORT" --arg password "$HY2_PASSWORD" \
+        --arg listen "::" --arg port "$HY2_PORT" --arg password "$HY2_PASSWORD" \
         --arg sni "$HY2_SNI" --arg cert "$HY2_CERT_FILE" --arg key "$HY2_KEY_FILE" \
         '{tag:"hysteria2-in",listen:$listen,port:($port|tonumber),protocol:"hysteria",settings:{version:2},streamSettings:{network:"hysteria",security:"tls",tlsSettings:{serverName:$sni,alpn:["h3"],certificates:[{usage:"encipherment",certificateFile:$cert,keyFile:$key}]},hysteriaSettings:{version:2,auth:$password}}}')
     write_config "$inbound_json" hysteria2-in hy2-in
     make_hy2_url "$SERVER_ADDRESS" "$HY2_PORT" "$HY2_PASSWORD" "$HY2_SNI"
     show_terminal_qr hysteria2 "$HY2_URL"
     node_json=$(jq -n \
-        --arg address "$SERVER_ADDRESS" --arg port "$HY2_PORT" --arg mode "$IP_MODE" \
+        --arg address "$SERVER_ADDRESS" --arg port "$HY2_PORT" \
         --arg password "$HY2_PASSWORD" --arg sni "$HY2_SNI" \
         --arg cert "$HY2_CERT_FILE" --arg key "$HY2_KEY_FILE" --arg url "$HY2_URL" \
-        '{address:$address,port:($port|tonumber),ipMode:$mode,password:$password,sni:$sni,certificateFile:$cert,keyFile:$key,url:$url}')
+        '{address:$address,port:($port|tonumber),password:$password,sni:$sni,certificateFile:$cert,keyFile:$key,url:$url}')
     save_node hy2 "$node_json"
     echo
     echo 'Hysteria2 节点参数已保存:'
@@ -994,6 +1012,7 @@ menu() {
             '7) 编辑 Xray 配置文件' \
             '8) 删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2' \
             '9) 配置/修改 Hysteria2' \
+            '10) 设置所有 Freedom 直连出站的 IP 模式' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -1007,8 +1026,9 @@ menu() {
             7) edit_config ;;
             8) remove_protocol ;;
             9) configure_hy2 ;;
+            10) configure_outbound_mode ;;
             0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-9。' ;;
+            *) echo '选择无效，请输入 0-10。' ;;
         esac
     done
 }
