@@ -72,25 +72,37 @@ install_dependencies() {
         fi
     done
 
-    if [ -z "$missing_dependencies" ]; then
+    if [ -n "$missing_dependencies" ]; then
+        info "缺少依赖: $missing_dependencies"
+        info "开始安装系统依赖，请稍候..."
+        if [ "$OS" = alpine ]; then
+            info "使用 apk 安装 curl、tar、openssl、ca-certificates、jq 和 iproute2"
+            apk add --no-cache curl tar openssl ca-certificates jq iproute2 >/dev/null
+        else
+            export DEBIAN_FRONTEND=noninteractive
+            info "使用 apt 更新软件包索引"
+            apt-get update -qq
+            info "使用 apt 安装 curl、tar、openssl、ca-certificates、jq 和 iproute2"
+            apt-get install -y -qq curl tar openssl ca-certificates jq iproute2 >/dev/null
+        fi
+    else
         info "系统依赖已存在，跳过软件包安装"
-        return
     fi
 
-    info "缺少依赖: $missing_dependencies"
-    info "开始安装系统依赖，请稍候..."
-    if [ "$OS" = alpine ]; then
-        info "使用 apk 安装 curl、tar、openssl、ca-certificates、jq 和 iproute2"
-        apk add --no-cache curl tar openssl ca-certificates jq iproute2 >/dev/null
-        # qrencode is optional; some Alpine releases provide it as a community subpackage.
+    if ! command -v qrencode >/dev/null 2>&1; then
         info "尝试安装终端二维码工具 qrencode（可选）"
-        apk add --no-cache libqrencode-tools >/dev/null 2>&1 || true
-    else
-        export DEBIAN_FRONTEND=noninteractive
-        info "使用 apt 更新软件包索引"
-        apt-get update -qq
-        info "使用 apt 安装 curl、tar、openssl、ca-certificates、jq、qrencode 和 iproute2"
-        apt-get install -y -qq curl tar openssl ca-certificates jq qrencode iproute2 >/dev/null
+        if [ "$OS" = alpine ]; then
+            if ! apk add --no-cache libqrencode-tools >/dev/null 2>&1; then
+                info "无法安装 libqrencode-tools；请确认 Alpine community 仓库已启用。"
+            fi
+        else
+            export DEBIAN_FRONTEND=noninteractive
+            if [ -z "$missing_dependencies" ] && ! apt-get update -qq; then
+                info "无法更新 apt 软件包索引，跳过二维码工具安装。"
+            elif ! apt-get install -y -qq qrencode >/dev/null; then
+                info "无法安装 qrencode；分享链接仍可正常显示。"
+            fi
+        fi
     fi
     info "系统依赖已准备完成"
 }
@@ -1005,13 +1017,13 @@ menu() {
         printf '%s\n' '' '========= Xray 管理菜单 =========' \
             '1) 配置/修改 VLESS Reality' \
             '2) 配置/修改 Shadowsocks 2022' \
-            '3) 重启 Xray' \
-            '4) 查看状态' \
-            '5) 查看节点和配置摘要' \
-            '6) 卸载 Xray（可选择保留备份或清空）' \
-            '7) 编辑 Xray 配置文件' \
-            '8) 删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2' \
-            '9) 配置/修改 Hysteria2' \
+            '3) 配置/修改 Hysteria2' \
+            '4) 重启 Xray' \
+            '5) 查看状态' \
+            '6) 查看节点和配置摘要' \
+            '7) 卸载 Xray（可选择保留备份或清空）' \
+            '8) 编辑 Xray 配置文件' \
+            '9) 删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2' \
             '10) 设置所有 Freedom 直连出站的 IP 模式' \
             '0) 退出' \
             '=================================' > /dev/tty
@@ -1019,13 +1031,13 @@ menu() {
         case "$choice" in
             1) configure_vless ;;
             2) configure_ss ;;
-            3) restart_xray ;;
-            4) show_status ;;
-            5) show_summary ;;
-            6) uninstall_xray ;;
-            7) edit_config ;;
-            8) remove_protocol ;;
-            9) configure_hy2 ;;
+            3) configure_hy2 ;;
+            4) restart_xray ;;
+            5) show_status ;;
+            6) show_summary ;;
+            7) uninstall_xray ;;
+            8) edit_config ;;
+            9) remove_protocol ;;
             10) configure_outbound_mode ;;
             0|q|Q) exit 0 ;;
             *) echo '选择无效，请输入 0-10。' ;;

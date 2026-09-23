@@ -35,13 +35,13 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 ```text
 1) 配置/修改 VLESS Reality
 2) 配置/修改 Shadowsocks 2022
-3) 重启 Xray
-4) 查看状态
-5) 查看节点和配置摘要
-6) 卸载 Xray
-7) 编辑 Xray 配置文件
-8) 删除节点
-9) 配置/修改 Hysteria2
+3) 配置/修改 Hysteria2
+4) 重启 Xray
+5) 查看状态
+6) 查看节点和配置摘要
+7) 卸载 Xray
+8) 编辑 Xray 配置文件
+9) 删除节点
 10) 设置所有 Freedom 直连出站的 IP 模式
 0) 退出
 ```
@@ -88,7 +88,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 
 ## 五、创建 Hysteria2
 
-1. 选择 `9`。
+1. 选择 `3`。
 2. 填写服务器域名或公网 IP。
 3. 填写 UDP 端口。
 4. 填写证书域名。
@@ -121,7 +121,7 @@ AsIs       使用 Xray 默认解析方式
 
 ## 七、查看节点和二维码
 
-选择菜单 `5`，脚本会显示：
+选择菜单 `6`，脚本会显示：
 
 - VLESS 分享链接
 - SS2022 分享链接
@@ -136,7 +136,7 @@ AsIs       使用 Xray 默认解析方式
 
 ### 重启
 
-选择菜单 `3`，或执行：
+选择菜单 `4`，或执行：
 
 ```bash
 sh xray.sh --restart
@@ -213,7 +213,7 @@ tail -f /var/log/xray/access.log
 
 ### 查看状态
 
-选择菜单 `4`，或执行：
+选择菜单 `5`，或执行：
 
 ```bash
 sh xray.sh --status
@@ -221,7 +221,7 @@ sh xray.sh --status
 
 ### 编辑配置
 
-选择菜单 `7`，或执行：
+选择菜单 `8`，或执行：
 
 ```bash
 sh xray.sh --edit
@@ -231,7 +231,7 @@ sh xray.sh --edit
 
 ### 删除节点
 
-选择菜单 `8`，然后选择要删除的协议。删除一个协议不会影响其他协议。
+选择菜单 `9`，然后选择要删除的协议。删除一个协议不会影响其他协议。
 
 也可以直接删除：
 
