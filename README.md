@@ -158,6 +158,22 @@ AsIs       使用 Xray 默认解析方式
 wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh
 ```
 
+### 3. 自定义出站（JSON）
+
+选择子菜单 `3`，可查看、添加/修改或删除自定义出站对象：
+
+- 添加时会打开编辑器并预填标准出站 JSON 模板（默认 `socks` 模板），可直接粘贴任意合法的 Xray 出站 JSON（需包含 `protocol` 和 `tag`）；
+- 保存后自动合并进 `outbounds`（同 `tag` 自动覆盖）并执行 `xray run -test` 校验；
+- 删除指定 `tag` 的出站时，会自动清理指向该 `tag` 的路由规则。
+
+### 4. 自定义路由规则（`routing.rules`）
+
+选择子菜单 `4`，可查看、添加、删除或清空 `routing.rules` 路由规则：
+
+- 支持按目标出站 `tag`（如 `direct`、`block`、`warp` 或自定义出站）分流；
+- 支持组合匹配条件：域名/`geosite`、IP/CIDR/`geoip`、端口、网络协议（`tcp`/`udp`）、来源入站 `tag`；
+- 支持选择插入到规则最前面（最高优先级）或末尾，保存前自动执行 `xray run -test` 校验。
+
 ## 七、查看节点和二维码
 
 选择菜单 `7`，脚本会显示：

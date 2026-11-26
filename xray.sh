@@ -220,6 +220,30 @@ get_warp_route_domains() {
     jq -r '[.routing.rules[]? | select(.outboundTag == "warp") | .domain[]?] | join(",")' "$CONFIG_FILE"
 }
 
+list_outbound_tags() {
+    jq -r '[.outbounds[]?.tag // empty] | join(", ")' "$CONFIG_FILE"
+}
+
+has_outbound_tag() {
+    tag_name=$1
+    jq -e --arg tag "$tag_name" 'any(.outbounds[]?; (.tag // "") == $tag)' "$CONFIG_FILE" >/dev/null 2>&1
+}
+
+show_routing_rules() {
+    rule_count=$(jq -r '(.routing.rules // []) | length' "$CONFIG_FILE")
+    if [ "$rule_count" -eq 0 ]; then
+        echo '（当前没有路由规则）'
+        return 0
+    fi
+    jq -r '(.routing.rules // []) | to_entries[] | "  \(.key + 1)) -> \(.value.outboundTag // "-")  " + ([
+      (if (.value.inboundTag // []) | length > 0 then "inbound=" + (.value.inboundTag | join(",")) else empty end),
+      (if (.value.domain // []) | length > 0 then "domain=" + (.value.domain | join(",")) else empty end),
+      (if (.value.ip // []) | length > 0 then "ip=" + (.value.ip | join(",")) else empty end),
+      (if (.value.port // "") != "" then "port=" + (.value.port | tostring) else empty end),
+      (if (.value.network // "") != "" then "network=" + (.value.network | tostring) else empty end)
+    ] | join(" "))' "$CONFIG_FILE"
+}
+
 get_vless_field() {
     field=$1
     jq -r --arg field "$field" \
@@ -1661,22 +1685,302 @@ configure_socks_outbound() {
     fi
 }
 
+configure_custom_routing() {
+    while :; do
+        echo
+        echo '=== 自定义出站路由规则 ==='
+        echo "可用出站 tag: $(list_outbound_tags)"
+        echo '当前路由规则（按从上到下顺序匹配）:'
+        show_routing_rules
+        echo
+        printf '%s\n' \
+            '  1) 添加一条路由规则' \
+            '  2) 删除一条路由规则' \
+            '  3) 清空所有路由规则' \
+            '  0) 返回' > /dev/tty
+        action_choice=$(prompt_input '请选择' '')
+        case "$action_choice" in
+            0|q|Q|'') return 0 ;;
+            1)
+                default_tag=direct
+                if has_outbound_tag warp; then
+                    default_tag=warp
+                elif has_outbound_tag block; then
+                    default_tag=block
+                fi
+                rule_outbound=$(prompt_input "目标出站 tag（可选: $(list_outbound_tags)）" "$default_tag")
+                has_outbound_tag "$rule_outbound" || die "找不到出站 tag: $rule_outbound"
+
+                rule_domains=$(prompt_input '匹配域名/geosite（逗号分隔，可留空，如 geosite:openai,domain:example.com）' '')
+                rule_ips=$(prompt_input '匹配 IP/CIDR/geoip（逗号分隔，可留空，如 geoip:cn,1.1.1.1,10.0.0.0/8）' '')
+                rule_port=$(prompt_input '匹配端口（可留空，如 443 或 80,443 或 1000-2000）' '')
+                rule_network=$(prompt_input '匹配网络协议（可留空：tcp / udp / tcp,udp）' '')
+                rule_inbounds=$(prompt_input '匹配来源入站 tag（逗号分隔，可留空，如 vless-reality-in）' '')
+
+                rule_domains=$(printf '%s' "$rule_domains" | tr -d '[:space:]')
+                rule_ips=$(printf '%s' "$rule_ips" | tr -d '[:space:]')
+                rule_port=$(printf '%s' "$rule_port" | tr -d '[:space:]')
+                rule_network=$(printf '%s' "$rule_network" | tr -d '[:space:]')
+                rule_inbounds=$(printf '%s' "$rule_inbounds" | tr -d '[:space:]')
+
+                if [ -z "$rule_domains" ] && [ -z "$rule_ips" ] && [ -z "$rule_port" ] && [ -z "$rule_network" ] && [ -z "$rule_inbounds" ]; then
+                    die '至少需要填写一项匹配条件（域名、IP、端口、网络协议或入站 tag）。'
+                fi
+                if [ -n "$rule_network" ]; then
+                    case "$rule_network" in
+                        tcp|udp|tcp,udp|udp,tcp) : ;;
+                        *) die '网络协议仅支持 tcp、udp 或 tcp,udp。' ;;
+                    esac
+                fi
+
+                insert_pos=top
+                if ! yes_no '插入到规则列表最前面（最高优先级）' yes; then
+                    insert_pos=bottom
+                fi
+
+                new_rule=$(jq -n \
+                    --arg outbound "$rule_outbound" \
+                    --arg domains "$rule_domains" \
+                    --arg ips "$rule_ips" \
+                    --arg port "$rule_port" \
+                    --arg network "$rule_network" \
+                    --arg inbounds "$rule_inbounds" \
+                    '{type:"field", outboundTag:$outbound}
+                     + (if $inbounds != "" then {inboundTag:($inbounds | split(",") | map(select(length > 0)))} else {} end)
+                     + (if $domains != "" then {domain:($domains | split(",") | map(select(length > 0)))} else {} end)
+                     + (if $ips != "" then {ip:($ips | split(",") | map(select(length > 0)))} else {} end)
+                     + (if $port != "" then {port:$port} else {} end)
+                     + (if $network != "" then {network:$network} else {} end)')
+
+                tmp_config="$CONFIG_FILE.route.$$.json"
+                jq --argjson rule "$new_rule" --arg pos "$insert_pos" \
+                    '.routing = ((.routing // {}) + {
+                       domainStrategy: (.routing.domainStrategy // "AsIs"),
+                       rules: (if $pos == "top" then ([$rule] + (.routing.rules // [])) else ((.routing.rules // []) + [$rule]) end)
+                     })' "$CONFIG_FILE" > "$tmp_config" || {
+                    rm -f "$tmp_config"
+                    die '生成路由规则配置失败。'
+                }
+
+                info "检查 Xray 配置"
+                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+                    rm -f "$tmp_config"
+                    die '配置检查失败，路由规则未修改。'
+                fi
+                mv "$tmp_config" "$CONFIG_FILE"
+                chmod 644 "$CONFIG_FILE"
+                echo '自定义路由规则已添加。'
+                if yes_no '现在重启 Xray 使配置生效' yes; then
+                    restart_xray
+                fi
+                ;;
+            2)
+                rule_count=$(jq -r '(.routing.rules // []) | length' "$CONFIG_FILE")
+                if [ "$rule_count" -eq 0 ]; then
+                    echo '没有可删除的路由规则。'
+                    continue
+                fi
+                del_idx=$(prompt_input "请输入要删除的规则序号（1-$rule_count，0 取消）" '0')
+                case "$del_idx" in
+                    ''|0) continue ;;
+                    *[!0-9]*) echo '请输入有效数字序号。'; continue ;;
+                esac
+                if [ "$del_idx" -lt 1 ] || [ "$del_idx" -gt "$rule_count" ]; then
+                    echo "序号超出范围（1-$rule_count）。"
+                    continue
+                fi
+                tmp_config="$CONFIG_FILE.route.$$.json"
+                jq --argjson idx "$((del_idx - 1))" \
+                    '.routing.rules = ((.routing.rules // []) | to_entries | map(select(.key != $idx)) | map(.value))' \
+                    "$CONFIG_FILE" > "$tmp_config" || {
+                    rm -f "$tmp_config"
+                    die '生成删除路由规则后的配置失败。'
+                }
+                info "检查 Xray 配置"
+                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+                    rm -f "$tmp_config"
+                    die '配置检查失败，路由规则未修改。'
+                fi
+                mv "$tmp_config" "$CONFIG_FILE"
+                chmod 644 "$CONFIG_FILE"
+                echo "已删除第 $del_idx 条路由规则。"
+                if yes_no '现在重启 Xray 使配置生效' yes; then
+                    restart_xray
+                fi
+                ;;
+            3)
+                yes_no '确认清空所有路由规则？' no || continue
+                tmp_config="$CONFIG_FILE.route.$$.json"
+                jq 'if .routing then .routing.rules = [] else . end' "$CONFIG_FILE" > "$tmp_config" || {
+                    rm -f "$tmp_config"
+                    die '生成清空路由规则后的配置失败。'
+                }
+                info "检查 Xray 配置"
+                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+                    rm -f "$tmp_config"
+                    die '配置检查失败，路由规则未修改。'
+                fi
+                mv "$tmp_config" "$CONFIG_FILE"
+                chmod 644 "$CONFIG_FILE"
+                echo '已清空所有路由规则。'
+                if yes_no '现在重启 Xray 使配置生效' yes; then
+                    restart_xray
+                fi
+                ;;
+            *) echo '选择无效，请输入 0-3。' ;;
+        esac
+    done
+}
+
+configure_custom_outbound() {
+    while :; do
+        echo
+        echo '=== 自定义出站管理（JSON） ==='
+        echo '当前出站列表:'
+        jq -r '.outbounds[]? | "  - tag=\(.tag // "-") protocol=\(.protocol // "-")"' "$CONFIG_FILE"
+        echo
+        printf '%s\n' \
+            '  1) 添加/修改自定义出站（打开编辑器粘贴 JSON）' \
+            '  2) 删除指定 tag 的出站' \
+            '  0) 返回' > /dev/tty
+        out_choice=$(prompt_input '请选择' '')
+        case "$out_choice" in
+            0|q|Q|'') return 0 ;;
+            1)
+                editor=${EDITOR:-}
+                if [ -z "$editor" ] || ! command -v "$editor" >/dev/null 2>&1; then
+                    editor=
+                    for candidate in vim nvim vi nano; do
+                        if command -v "$candidate" >/dev/null 2>&1; then
+                            editor=$candidate
+                            break
+                        fi
+                    done
+                fi
+                [ -n "$editor" ] || die "找不到编辑器，请先安装 vi、vim 或 nano。"
+
+                out_tmp="$CONFIG_FILE.outbound.$$.json"
+                cat > "$out_tmp" <<'EOF'
+{
+  "protocol": "socks",
+  "settings": {
+    "servers": [
+      {
+        "address": "127.0.0.1",
+        "port": 40000
+      }
+    ]
+  },
+  "tag": "custom-out"
+}
+EOF
+                info "请在编辑器中修改或粘贴自定义出站 JSON，保存后退出: $out_tmp"
+                stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                case "$editor" in
+                    *vim*|*nvim*)
+                        if ! "$editor" -N -n -u NONE -U NONE -i NONE "$out_tmp" </dev/tty >/dev/tty; then
+                            rm -f "$out_tmp"
+                            stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                            echo '编辑器退出失败，未修改配置。'
+                            continue
+                        fi
+                        ;;
+                    *)
+                        if ! "$editor" "$out_tmp" </dev/tty >/dev/tty; then
+                            rm -f "$out_tmp"
+                            stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                            echo '编辑器退出失败，未修改配置。'
+                            continue
+                        fi
+                        ;;
+                esac
+                stty sane </dev/tty >/dev/tty 2>/dev/null || true
+
+                if ! jq -e 'type == "object" and (.protocol | type == "string" and length > 0) and (.tag | type == "string" and length > 0)' "$out_tmp" >/dev/null 2>&1; then
+                    rm -f "$out_tmp"
+                    echo '自定义出站 JSON 无效：必须是包含非空 "protocol" 和 "tag" 的 JSON 对象。'
+                    continue
+                fi
+                custom_tag=$(jq -r '.tag' "$out_tmp")
+                tmp_config="$CONFIG_FILE.custom-out.$$.json"
+                jq --slurpfile new_out "$out_tmp" --arg tag "$custom_tag" \
+                    '.outbounds = (((.outbounds // []) | map(select((.tag // "") != $tag))) + [$new_out[0]])' \
+                    "$CONFIG_FILE" > "$tmp_config" || {
+                    rm -f "$out_tmp" "$tmp_config"
+                    echo '合并自定义出站配置失败。'
+                    continue
+                }
+                rm -f "$out_tmp"
+
+                info "检查 Xray 配置"
+                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+                    rm -f "$tmp_config"
+                    echo '配置检查失败，自定义出站未保存。'
+                    continue
+                fi
+                mv "$tmp_config" "$CONFIG_FILE"
+                chmod 644 "$CONFIG_FILE"
+                echo "自定义出站已保存: tag=$custom_tag"
+                if yes_no '现在重启 Xray 使配置生效' yes; then
+                    restart_xray
+                fi
+                ;;
+            2)
+                del_tag=$(prompt_input "请输入要删除的出站 tag（可选: $(list_outbound_tags)，留空取消）" '')
+                [ -n "$del_tag" ] || continue
+                if ! has_outbound_tag "$del_tag"; then
+                    echo "找不到出站 tag: $del_tag"
+                    continue
+                fi
+                yes_no "确认删除出站 $del_tag（同时移除指向该 tag 的路由规则）？" no || continue
+                tmp_config="$CONFIG_FILE.custom-out.$$.json"
+                jq --arg tag "$del_tag" \
+                    '.outbounds = ((.outbounds // []) | map(select((.tag // "") != $tag)))
+                     | if .routing.rules then .routing.rules = (.routing.rules | map(select((.outboundTag // "") != $tag))) else . end' \
+                    "$CONFIG_FILE" > "$tmp_config" || {
+                    rm -f "$tmp_config"
+                    echo '生成删除出站后的配置失败。'
+                    continue
+                }
+                info "检查 Xray 配置"
+                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+                    rm -f "$tmp_config"
+                    echo '配置检查失败，出站未删除。'
+                    continue
+                fi
+                mv "$tmp_config" "$CONFIG_FILE"
+                chmod 644 "$CONFIG_FILE"
+                echo "已删除出站: $del_tag"
+                if yes_no '现在重启 Xray 使配置生效' yes; then
+                    restart_xray
+                fi
+                ;;
+            *) echo '选择无效，请输入 0、1 或 2。' ;;
+        esac
+    done
+}
+
 configure_outbound_menu() {
     echo
     echo '=== 出站与出口路由设置 ==='
     echo "当前直连 IP 模式: $(get_domain_strategy)"
     echo "当前 SOCKS5 / WARP 出口: $(get_warp_route_summary)"
+    echo "当前所有出站 tag: $(list_outbound_tags)"
     echo
     printf '%s\n' \
         '  1) 设置所有 Freedom 直连出站的 IP 模式（UseIPv6v4 / UseIPv4 / UseIPv6 / AsIs）' \
         '  2) 配置 SOCKS5 / WARP 出口路由' \
+        '  3) 管理自定义出站（粘贴/编辑 JSON）' \
+        '  4) 管理自定义路由规则（routing.rules）' \
         '  0) 返回' > /dev/tty
     sub_choice=$(prompt_input '请选择' '')
     case "$sub_choice" in
         1) configure_outbound_mode ;;
         2) configure_socks_outbound ;;
+        3) configure_custom_outbound ;;
+        4) configure_custom_routing ;;
         0|q|Q|'') return 0 ;;
-        *) echo '选择无效，请输入 0、1 或 2。' ;;
+        *) echo '选择无效，请输入 0-4。' ;;
     esac
 }
 
