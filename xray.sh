@@ -30,6 +30,7 @@ usage() {
   sh xray.sh --ss            直接配置/修改 Shadowsocks 2022
   sh xray.sh --hy2           直接配置/修改 Hysteria2
   sh xray.sh --xhttp         直接配置/修改 VLESS XHTTP
+  sh xray.sh --warp          配置 SOCKS5 / WARP 出口路由
   sh xray.sh --edit          编辑并检查 Xray 配置文件
   sh xray.sh --remove        交互选择并删除 VLESS、SS2022、Hysteria2 或 XHTTP
   sh xray.sh --remove-vless  删除 VLESS Reality 入站
@@ -182,6 +183,40 @@ get_node_field() {
 
 get_domain_strategy() {
     jq -r 'first(.outbounds[]? | select(.protocol == "freedom") | (.streamSettings.sockopt.domainStrategy // .settings.domainStrategy)) // "AsIs"' "$CONFIG_FILE"
+}
+
+get_warp_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.outbounds[]? | select(.tag == "warp" and .protocol == "socks") | .settings.servers[0][$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_warp_user() {
+    jq -r 'first(.outbounds[]? | select(.tag == "warp" and .protocol == "socks") | .settings.servers[0].users[0].user) // empty' "$CONFIG_FILE"
+}
+
+get_warp_pass() {
+    jq -r 'first(.outbounds[]? | select(.tag == "warp" and .protocol == "socks") | .settings.servers[0].users[0].pass) // empty' "$CONFIG_FILE"
+}
+
+get_warp_route_summary() {
+    jq -r '
+      (first(.outbounds[]? | select(.tag == "warp" and .protocol == "socks") | .settings.servers[0]) // null) as $srv |
+      if $srv == null then
+        "未启用"
+      else
+        ([.routing.rules[]? | select(.outboundTag == "warp")] |
+          if length == 0 then "已添加出站（\($srv.address):\($srv.port)），未配置路由规则"
+          elif any(.[]; (.network // "") != "" and ((.domain // []) | length == 0)) then "全局走 warp（\($srv.address):\($srv.port)）"
+          else "按域名分流走 warp（\($srv.address):\($srv.port)）: " + ([.[] | .domain[]?] | join(","))
+          end)
+      end
+    ' "$CONFIG_FILE"
+}
+
+get_warp_route_domains() {
+    jq -r '[.routing.rules[]? | select(.outboundTag == "warp") | .domain[]?] | join(",")' "$CONFIG_FILE"
 }
 
 get_vless_field() {
@@ -1147,6 +1182,7 @@ show_summary() {
     jq -r '.inbounds[]? | "tag=\(.tag // "-") protocol=\(.protocol // "-") listen=\(.listen // "-") port=\(.port // "-")"' "$CONFIG_FILE"
     echo
     echo "出站 IP 策略: $(get_domain_strategy)"
+    echo "SOCKS5 / WARP 出口: $(get_warp_route_summary)"
     echo "配置文件: $CONFIG_FILE"
     echo "节点参数: $NODES_FILE"
     show_vless_node
@@ -1507,6 +1543,123 @@ configure_xhttp() {
     fi
 }
 
+configure_socks_outbound() {
+    old_addr=$(get_warp_field address)
+    old_port=$(get_warp_field port)
+    old_user=$(get_warp_user)
+    old_pass=$(get_warp_pass)
+    old_domains=$(get_warp_route_domains)
+
+    echo
+    echo '=== 配置 SOCKS5 / WARP 出口路由 ==='
+    echo "当前状态: $(get_warp_route_summary)"
+    echo '提示: 如需在本机部署 WARP SOCKS5 代理（默认监听 127.0.0.1:40000），可先运行:'
+    echo '  wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh'
+    echo
+    printf '%s\n' \
+        '请选择出口路由模式:' \
+        '  1) 全局走 SOCKS5 / WARP 出口' \
+        '  2) 按域名分流走 SOCKS5 / WARP（其余走直连）' \
+        '  3) 仅添加 warp 出站，不修改路由规则' \
+        '  4) 移除 warp 出站和对应路由规则（恢复直连）' \
+        '  0) 取消' > /dev/tty
+    route_choice=$(prompt_input '请选择' '1')
+
+    tmp_config="$CONFIG_FILE.warp.$$.json"
+    case "$route_choice" in
+        0|q|Q)
+            echo '已取消。'
+            return 0
+            ;;
+        4)
+            jq '.outbounds = ((.outbounds // []) | map(select((.tag // "") != "warp")))
+                | if .routing.rules then .routing.rules = (.routing.rules | map(select((.outboundTag // "") != "warp"))) else . end' \
+                "$CONFIG_FILE" > "$tmp_config" || {
+                rm -f "$tmp_config"
+                die '生成移除 warp 后的配置失败。'
+            }
+            info "检查 Xray 配置"
+            if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+                rm -f "$tmp_config"
+                die '配置检查失败，未修改配置。'
+            fi
+            mv "$tmp_config" "$CONFIG_FILE"
+            chmod 644 "$CONFIG_FILE"
+            echo '已移除 warp SOCKS5 出站和对应路由规则。'
+            if yes_no '现在重启 Xray 使配置生效' yes; then
+                restart_xray
+            fi
+            return 0
+            ;;
+        1|2|3) : ;;
+        *) die '选择无效，请输入 0-4。' ;;
+    esac
+
+    SOCKS_ADDR=$(prompt_input 'SOCKS5 代理地址' "${old_addr:-127.0.0.1}")
+    SOCKS_PORT=$(prompt_input 'SOCKS5 代理端口' "${old_port:-40000}")
+    SOCKS_USER=$(prompt_input 'SOCKS5 用户名（可选，无认证直接回车）' "$old_user")
+    SOCKS_PASS=
+    if [ -n "$SOCKS_USER" ]; then
+        SOCKS_PASS=$(prompt_input 'SOCKS5 密码' "$old_pass")
+    fi
+
+    validate_server_address "$SOCKS_ADDR" || die "SOCKS5 地址格式无效。"
+    is_port "$SOCKS_PORT" || die "SOCKS5 端口无效。"
+
+    WARP_DOMAINS=
+    if [ "$route_choice" = 2 ]; then
+        WARP_DOMAINS=$(prompt_input '分流域名/geosite（逗号分隔，如 geosite:openai,geosite:netflix,geosite:google）' "${old_domains:-geosite:openai,geosite:netflix}")
+        WARP_DOMAINS=$(printf '%s' "$WARP_DOMAINS" | tr -d '[:space:]')
+        [ -n "$WARP_DOMAINS" ] || die '分流域名不能为空。'
+    fi
+
+    warp_outbound=$(jq -n \
+        --arg addr "$SOCKS_ADDR" \
+        --arg port "$SOCKS_PORT" \
+        --arg user "$SOCKS_USER" \
+        --arg pass "$SOCKS_PASS" \
+        '{protocol:"socks", settings:{servers:[({address:$addr, port:($port|tonumber)} + (if $user != "" then {users:[{user:$user, pass:$pass}]} else {} end))]}, tag:"warp"}')
+
+    case "$route_choice" in
+        1)
+            jq --argjson warp "$warp_outbound" \
+                '.outbounds = (((.outbounds // []) | map(select((.tag // "") != "warp"))) + [$warp])
+                 | .routing = ((.routing // {}) + {
+                     domainStrategy: (.routing.domainStrategy // "AsIs"),
+                     rules: (((.routing.rules // []) | map(select((.outboundTag // "") != "warp"))) + [{type:"field", network:"tcp,udp", outboundTag:"warp"}])
+                   })' "$CONFIG_FILE" > "$tmp_config"
+            ;;
+        2)
+            jq --argjson warp "$warp_outbound" --arg domains "$WARP_DOMAINS" \
+                '.outbounds = (((.outbounds // []) | map(select((.tag // "") != "warp"))) + [$warp])
+                 | .routing = ((.routing // {}) + {
+                     domainStrategy: (.routing.domainStrategy // "AsIs"),
+                     rules: ([{type:"field", domain:($domains | split(",") | map(select(length > 0))), outboundTag:"warp"}] + ((.routing.rules // []) | map(select((.outboundTag // "") != "warp"))))
+                   })' "$CONFIG_FILE" > "$tmp_config"
+            ;;
+        3)
+            jq --argjson warp "$warp_outbound" \
+                '.outbounds = (((.outbounds // []) | map(select((.tag // "") != "warp"))) + [$warp])' \
+                "$CONFIG_FILE" > "$tmp_config"
+            ;;
+    esac || {
+        rm -f "$tmp_config"
+        die '生成 SOCKS5 / WARP 出口配置失败。'
+    }
+
+    info "检查 Xray 配置"
+    if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+        rm -f "$tmp_config"
+        die '配置检查失败，SOCKS5 / WARP 出口未修改。'
+    fi
+    mv "$tmp_config" "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+    echo "SOCKS5 / WARP 出口配置已保存: $(get_warp_route_summary)"
+    if yes_no '现在重启 Xray 使配置生效' yes; then
+        restart_xray
+    fi
+}
+
 menu() {
     [ -r /dev/tty ] && [ -w /dev/tty ] || die "交互菜单需要可用的终端。"
     while :; do
@@ -1522,6 +1675,7 @@ menu() {
             '9) 编辑 Xray 配置文件' \
             '10) 删除 VLESS Reality、Shadowsocks 2022、Hysteria2 或 VLESS XHTTP' \
             '11) 设置所有 Freedom 直连出站的 IP 模式' \
+            '12) 配置 SOCKS5 / WARP 出口路由' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -1537,8 +1691,9 @@ menu() {
             9) edit_config ;;
             10) remove_protocol ;;
             11) configure_outbound_mode ;;
+            12) configure_socks_outbound ;;
             0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-11。' ;;
+            *) echo '选择无效，请输入 0-12。' ;;
         esac
     done
 }
@@ -1551,6 +1706,7 @@ main() {
             --ss|--ss2022) ACTION=ss ;;
             --hy2|--hysteria2) ACTION=hy2 ;;
             --xhttp) ACTION=xhttp ;;
+            --warp|--socks-outbound) ACTION=warp ;;
             --edit) ACTION=edit ;;
             --remove) ACTION=remove ;;
             --remove-vless) ACTION=remove; REMOVE_PROTO=vless ;;
@@ -1584,6 +1740,7 @@ main() {
         ss) configure_ss ;;
         hy2) configure_hy2 ;;
         xhttp) configure_xhttp ;;
+        warp) configure_socks_outbound ;;
         edit) edit_config ;;
         remove) remove_protocol ;;
         restart) restart_xray ;;
