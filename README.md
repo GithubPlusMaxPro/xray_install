@@ -38,13 +38,14 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 2) 配置/修改 Shadowsocks 2022
 3) 配置/修改 Hysteria2
 4) 配置/修改 VLESS XHTTP
-5) 重启 Xray
-6) 查看状态
-7) 查看节点和配置摘要
-8) 卸载 Xray（可选择保留备份或清空）
-9) 编辑 Xray 配置文件
-10) 删除 VLESS Reality、Shadowsocks 2022、Hysteria2 或 VLESS XHTTP
-11) 出站与出口路由设置（IP 模式 / SOCKS5 WARP）
+5) 出站与出口路由设置（IP 模式 / SOCKS5 WARP / 自定义）
+6) 查看节点和配置摘要
+7) 重启 Xray
+8) 查看状态与近期错误日志
+9) 更新 Xray 内核
+10) 编辑 Xray 配置文件
+11) 删除节点（VLESS / SS2022 / Hysteria2 / XHTTP）
+12) 卸载 Xray（可选择保留备份或清空）
 0) 退出
 ```
 
@@ -85,7 +86,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
    - `none`：无 TLS，默认监听 `127.0.0.1`，适合配合 Nginx/Caddy/CDN 反代（可选配置信任的 XFF 头部）
 5. 保存并重启。
 
-VLESS XHTTP 入站不使用 `xtls-rprx-vision` flow，脚本会自动生成标准 `type=xhttp` 分享链接与二维码。如需设置 `xhttpSettings.extra`（如 `xmux` 或 `downloadSettings`），可通过菜单 `9` 编辑配置文件；查看节点摘要时会自动把 `extra` 编码进分享链接。
+VLESS XHTTP 入站不使用 `xtls-rprx-vision` flow，脚本会自动生成标准 `type=xhttp` 分享链接与二维码。如需设置 `xhttpSettings.extra`（如 `xmux` 或 `downloadSettings`），可通过菜单 `10` 编辑配置文件；查看节点摘要时会自动把 `extra` 编码进分享链接。
 
 ## 四、创建 Shadowsocks 2022
 
@@ -128,7 +129,7 @@ VLESS XHTTP 入站不使用 `xtls-rprx-vision` flow，脚本会自动生成标�
 
 ## 六、出站与出口路由设置
 
-在菜单选择 `11`（或执行 `sh xray.sh --outbound`），可统一管理出站策略与出口路由：
+在菜单选择 `5`（或执行 `sh xray.sh --outbound`），可统一管理出站策略与出口路由：
 
 ### 1. Freedom 直连出站 IP 模式
 
@@ -176,7 +177,7 @@ wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh
 
 ## 七、查看节点和二维码
 
-选择菜单 `7`，脚本会显示：
+选择菜单 `6`，脚本会显示：
 
 - VLESS 分享链接
 - SS2022 分享链接
@@ -192,7 +193,7 @@ wget -N https://gitlab.com/fscarmen/warp/-/raw/main/menu.sh && bash menu.sh
 
 ### 重启
 
-选择菜单 `5`，或执行：
+选择菜单 `7`，或执行：
 
 ```bash
 sh xray.sh --restart
@@ -267,17 +268,25 @@ tail -f /var/log/xray/error.log
 tail -f /var/log/xray/access.log
 ```
 
-### 查看状态
+### 查看状态与近期错误日志
 
-选择菜单 `6`，或执行：
+选择菜单 `8`，或执行：
 
 ```bash
 sh xray.sh --status
 ```
 
-### 编辑配置
+### 更新 Xray 内核
 
 选择菜单 `9`，或执行：
+
+```bash
+sh xray.sh --update
+```
+
+### 编辑配置
+
+选择菜单 `10`，或执行：
 
 ```bash
 sh xray.sh --edit
@@ -287,7 +296,7 @@ sh xray.sh --edit
 
 ### 删除节点
 
-选择菜单 `10`，然后选择要删除的协议。删除一个协议不会影响其他协议。
+选择菜单 `11`，然后选择要删除的协议。删除一个协议不会影响其他协议。
 
 也可以直接删除：
 
@@ -315,7 +324,7 @@ sh xray.sh --vless                    # 直接配置/修改 VLESS Reality
 sh xray.sh --ss                       # 直接配置/修改 Shadowsocks 2022
 sh xray.sh --hy2                      # 直接配置/修改 Hysteria2
 sh xray.sh --xhttp                    # 直接配置/修改 VLESS XHTTP
-sh xray.sh --outbound                 # 出站与出口路由设置（IP 模式 / SOCKS5 WARP）
+sh xray.sh --outbound                 # 出站与出口路由设置（IP 模式 / SOCKS5 WARP / 自定义）
 sh xray.sh --warp                     # 直接配置 SOCKS5 / WARP 出口路由
 sh xray.sh --edit                     # 编辑并检查 Xray 配置文件
 sh xray.sh --remove                   # 交互选择并删除协议
@@ -324,7 +333,8 @@ sh xray.sh --remove-ss                # 删除 Shadowsocks 2022 入站
 sh xray.sh --remove-hy2               # 删除 Hysteria2 入站
 sh xray.sh --remove-xhttp             # 删除 VLESS XHTTP 入站
 sh xray.sh --restart                  # 重启 Xray
-sh xray.sh --status                   # 查看 Xray 状态
+sh xray.sh --status                   # 查看 Xray 状态与近期错误日志
+sh xray.sh --update                   # 更新 Xray 内核到最新版本
 sh xray.sh --help                     # 查看帮助
 sh xray.sh --uninstall                # 交互确认后卸载
 sh xray.sh --uninstall --yes          # 无交互卸载，默认保留备份
@@ -356,7 +366,7 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 
 修改节点时，脚本会先生成临时配置并检查 Xray 配置。检查通过后才会替换正式配置；检查失败时原配置不会改变。脚本不会为每次修改自动保存旧配置副本。
 
-编辑配置时，菜单第 `9` 项和下面的命令都使用临时文件：
+编辑配置时，菜单第 `10` 项和下面的命令都使用临时文件：
 
 ```bash
 sh xray.sh --edit

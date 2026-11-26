@@ -39,7 +39,8 @@ usage() {
   sh xray.sh --remove-hy2    删除 Hysteria2 入站
   sh xray.sh --remove-xhttp  删除 VLESS XHTTP 入站
   sh xray.sh --restart       重启 Xray
-  sh xray.sh --status        查看 Xray 状态
+  sh xray.sh --status        查看 Xray 状态与近期错误日志
+  sh xray.sh --update        更新 Xray 内核到最新版本
   sh xray.sh --uninstall     停止并卸载 Xray（会先备份）
   sh xray.sh --uninstall --yes  无交互确认卸载
   sh xray.sh --uninstall --purge --yes  无交互卸载并清空配置/日志
@@ -93,7 +94,7 @@ install_dependencies() {
         info "系统依赖已存在，跳过软件包安装"
     fi
 
-    if ! command -v qrencode >/dev/null 2>&1; then
+    if ! command -v qrencode >/dev/null 2>&1 && { [ -n "$missing_dependencies" ] || [ ! -x "$XRAY_BIN" ]; }; then
         info "尝试安装终端二维码工具 qrencode（可选）"
         if [ "$OS" = alpine ]; then
             if ! apk add --no-cache libqrencode-tools >/dev/null 2>&1; then
@@ -111,16 +112,11 @@ install_dependencies() {
     info "系统依赖已准备完成"
 }
 
-install_xray() {
-    if [ -x "$XRAY_BIN" ]; then
-        info "已找到 Xray 内核: $XRAY_BIN，跳过下载"
-        return
-    fi
-
+run_xray_installer() {
     temp_dir=$(mktemp -d)
     trap 'rm -rf "$temp_dir"' EXIT HUP INT TERM
     if [ "$OS" = alpine ]; then
-        info "安装 Xray Alpine/OpenRC 版本"
+        info "安装/更新 Xray Alpine/OpenRC 版本"
         info "正在从 GitHub 下载 Xray 安装程序..."
         curl -fL --retry 3 --progress-bar \
             https://github.com/XTLS/Xray-install/raw/main/alpinelinux/install-release.sh \
@@ -128,7 +124,7 @@ install_xray() {
         info "正在执行 Xray Alpine 安装程序..."
         sh "$temp_dir/install-release.sh"
     else
-        info "安装 Xray systemd 版本"
+        info "安装/更新 Xray systemd 版本"
         info "正在从 GitHub 下载 Xray 安装程序..."
         curl -fL --retry 3 --progress-bar \
             https://github.com/XTLS/Xray-install/raw/main/install-release.sh \
@@ -136,8 +132,35 @@ install_xray() {
         info "正在执行 Xray Debian/Ubuntu 安装程序..."
         bash "$temp_dir/install-release.sh" install
     fi
-    [ -x "$XRAY_BIN" ] || die "Xray 安装失败，找不到 $XRAY_BIN"
+    rm -rf "$temp_dir"
+    trap - EXIT HUP INT TERM
+    [ -x "$XRAY_BIN" ] || die "Xray 安装/更新失败，找不到 $XRAY_BIN"
+}
+
+install_xray() {
+    if [ -x "$XRAY_BIN" ]; then
+        info "已找到 Xray 内核: $XRAY_BIN，跳过下载"
+        return
+    fi
+    run_xray_installer
     info "Xray 内核安装完成: $XRAY_BIN"
+}
+
+update_xray() {
+    echo
+    echo '=== 更新 Xray 内核 ==='
+    if [ -x "$XRAY_BIN" ]; then
+        echo "当前版本: $("$XRAY_BIN" version 2>/dev/null | head -n 1)"
+    fi
+    yes_no '确认下载并更新 Xray 内核到最新版本' yes || {
+        echo '已取消更新。'
+        return 0
+    }
+    run_xray_installer
+    echo "更新后版本: $("$XRAY_BIN" version 2>/dev/null | head -n 1)"
+    if yes_no '现在重启 Xray 使新内核生效' yes; then
+        restart_xray
+    fi
 }
 
 ensure_base_files() {
@@ -676,20 +699,22 @@ yes_no() {
     else
         suffix='y/N'
     fi
-    printf '%s [%s]: ' "$prompt_text" "$suffix" > /dev/tty
-    answer=
-    if IFS= read -r answer < /dev/tty; then
-        :
-    else
+    while :; do
+        printf '%s [%s]: ' "$prompt_text" "$suffix" > /dev/tty
         answer=
-    fi
-    answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')
-    case "$answer" in
-        y|yes) return 0 ;;
-        n|no) return 1 ;;
-        '') [ "$default_value" = yes ] && return 0 || return 1 ;;
-        *) die "请输入 y 或 n。" ;;
-    esac
+        if IFS= read -r answer < /dev/tty; then
+            :
+        else
+            answer=
+        fi
+        answer=$(printf '%s' "$answer" | tr '[:upper:]' '[:lower:]')
+        case "$answer" in
+            y|yes) return 0 ;;
+            n|no) return 1 ;;
+            '') [ "$default_value" = yes ] && return 0 || return 1 ;;
+            *) printf '%s\n' '请输入 y 或 n。' > /dev/tty ;;
+        esac
+    done
 }
 
 derive_server_name() {
@@ -756,17 +781,7 @@ configure_outbound_mode() {
         die '生成出站模式配置失败。'
     }
 
-    info "检查 Xray 配置"
-    if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-        rm -f "$tmp_config"
-        die '配置检查失败，出站模式未修改。'
-    fi
-    mv "$tmp_config" "$CONFIG_FILE"
-    chmod 644 "$CONFIG_FILE"
-    echo "所有 Freedom 直连出站的域名解析模式已设为: $DOMAIN_STRATEGY"
-    if yes_no '现在重启 Xray 使配置生效' yes; then
-        restart_xray
-    fi
+    apply_config "$tmp_config" "所有 Freedom 直连出站的域名解析模式已设为: $DOMAIN_STRATEGY"
 }
 
 choose_ss_method() {
@@ -929,6 +944,64 @@ save_node() {
     chmod 600 "$NODES_FILE"
 }
 
+validate_and_install_config() {
+    candidate_config=$1
+    info "检查 Xray 配置"
+    if ! "$XRAY_BIN" run -test -format json -config "$candidate_config"; then
+        rm -f "$candidate_config"
+        die "配置检查失败，正式配置未修改。"
+    fi
+    mv "$candidate_config" "$CONFIG_FILE"
+    chmod 644 "$CONFIG_FILE"
+}
+
+apply_config() {
+    candidate_config=$1
+    success_message=${2:-"配置已保存: $CONFIG_FILE"}
+    validate_and_install_config "$candidate_config"
+    echo "$success_message"
+    if yes_no '现在重启 Xray 使配置生效' yes; then
+        restart_xray
+    fi
+}
+
+open_in_editor() {
+    target_file=$1
+    editor=${EDITOR:-}
+    if [ -z "$editor" ] || ! command -v "$editor" >/dev/null 2>&1; then
+        editor=
+        for candidate in vim nvim vi nano; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+                editor=$candidate
+                break
+            fi
+        done
+    fi
+    [ -n "$editor" ] || {
+        rm -f "$target_file"
+        die "找不到编辑器，请先安装 vi、vim 或 nano。"
+    }
+
+    # Ensure a clean terminal before and after the full-screen editor.
+    stty sane </dev/tty >/dev/tty 2>/dev/null || true
+    case "$editor" in
+        *vim*|*nvim*)
+            if ! "$editor" -N -n -u NONE -U NONE -i NONE "$target_file" </dev/tty >/dev/tty; then
+                stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                return 1
+            fi
+            ;;
+        *)
+            if ! "$editor" "$target_file" </dev/tty >/dev/tty; then
+                stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                return 1
+            fi
+            ;;
+    esac
+    stty sane </dev/tty >/dev/tty 2>/dev/null || true
+    [ -f "$target_file" ]
+}
+
 write_config() {
     inbound_json=$1
     remove_tag_one=$2
@@ -948,15 +1021,12 @@ write_config() {
             .outbounds
           else
             ((.outbounds // []) + [{tag: "direct", protocol: "freedom", settings: {}}])
-          end)' "$CONFIG_FILE" > "$tmp_config"
-
-    info "检查 Xray 配置"
-    if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+          end)' "$CONFIG_FILE" > "$tmp_config" || {
         rm -f "$tmp_config"
-        die "配置检查失败，正式配置未修改。"
-    fi
-    mv "$tmp_config" "$CONFIG_FILE"
-    chmod 644 "$CONFIG_FILE"
+        die "生成 Xray 配置失败。"
+    }
+
+    validate_and_install_config "$tmp_config"
     echo "配置已保存: $CONFIG_FILE"
 }
 
@@ -978,60 +1048,12 @@ restart_xray() {
 edit_config() {
     edit_tmp="$CONFIG_FILE.edit.$$.json"
     cp "$CONFIG_FILE" "$edit_tmp"
-
-    editor=${EDITOR:-}
-    if [ -z "$editor" ] || ! command -v "$editor" >/dev/null 2>&1; then
-        editor=
-        for candidate in vim nvim vi nano; do
-            if command -v "$candidate" >/dev/null 2>&1; then
-                editor=$candidate
-                break
-            fi
-        done
-    fi
-    [ -n "$editor" ] || {
-        rm -f "$edit_tmp"
-        die "找不到编辑器，请先安装 vi、vim 或 nano。"
-    }
-
     info "正在编辑临时配置: $edit_tmp"
-    # Ensure a clean terminal before and after the full-screen editor.
-    stty sane </dev/tty >/dev/tty 2>/dev/null || true
-    case "$editor" in
-        *vim*|*nvim*)
-            if ! "$editor" -N -n -u NONE -U NONE -i NONE "$edit_tmp" </dev/tty >/dev/tty; then
-                rm -f "$edit_tmp"
-                stty sane </dev/tty >/dev/tty 2>/dev/null || true
-                die "编辑器退出失败，正式配置未修改。"
-            fi
-            ;;
-        *)
-            if ! "$editor" "$edit_tmp" </dev/tty >/dev/tty; then
-                rm -f "$edit_tmp"
-                stty sane </dev/tty >/dev/tty 2>/dev/null || true
-                die "编辑器退出失败，正式配置未修改。"
-            fi
-            ;;
-    esac
-    stty sane </dev/tty >/dev/tty 2>/dev/null || true
-    if [ ! -f "$edit_tmp" ]; then
+    if ! open_in_editor "$edit_tmp"; then
         rm -f "$edit_tmp"
-        die "编辑器未生成配置文件，正式配置未修改。"
+        die "编辑器退出失败或未生成配置文件，正式配置未修改。"
     fi
-
-    info "检查编辑后的 Xray 配置"
-    if ! "$XRAY_BIN" run -test -format json -config "$edit_tmp"; then
-        rm -f "$edit_tmp"
-        die "配置检查失败，正式配置未修改。"
-    fi
-
-    mv "$edit_tmp" "$CONFIG_FILE"
-    chmod 644 "$CONFIG_FILE"
-    echo "配置已保存: $CONFIG_FILE"
-    if yes_no '现在重启 Xray 使配置生效' yes; then
-        restart_xray
-    fi
-    echo '编辑完成，已返回管理菜单；输入 0 退出。'
+    apply_config "$edit_tmp" "配置已保存: $CONFIG_FILE"
 }
 
 remove_protocol() {
@@ -1198,6 +1220,11 @@ show_status() {
         systemctl --no-pager --full status xray || true
     elif command -v rc-service >/dev/null 2>&1; then
         rc-service xray status || true
+    fi
+    if [ -s /var/log/xray/error.log ]; then
+        echo
+        echo '=== 近期错误日志 (/var/log/xray/error.log，最近 15 行) ==='
+        tail -n 15 /var/log/xray/error.log 2>/dev/null || true
     fi
 }
 
@@ -1603,17 +1630,7 @@ configure_socks_outbound() {
                 rm -f "$tmp_config"
                 die '生成移除 warp 后的配置失败。'
             }
-            info "检查 Xray 配置"
-            if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-                rm -f "$tmp_config"
-                die '配置检查失败，未修改配置。'
-            fi
-            mv "$tmp_config" "$CONFIG_FILE"
-            chmod 644 "$CONFIG_FILE"
-            echo '已移除 warp SOCKS5 出站和对应路由规则。'
-            if yes_no '现在重启 Xray 使配置生效' yes; then
-                restart_xray
-            fi
+            apply_config "$tmp_config" '已移除 warp SOCKS5 出站和对应路由规则。'
             return 0
             ;;
         1|2|3) : ;;
@@ -1672,13 +1689,7 @@ configure_socks_outbound() {
         die '生成 SOCKS5 / WARP 出口配置失败。'
     }
 
-    info "检查 Xray 配置"
-    if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-        rm -f "$tmp_config"
-        die '配置检查失败，SOCKS5 / WARP 出口未修改。'
-    fi
-    mv "$tmp_config" "$CONFIG_FILE"
-    chmod 644 "$CONFIG_FILE"
+    validate_and_install_config "$tmp_config"
     echo "SOCKS5 / WARP 出口配置已保存: $(get_warp_route_summary)"
     if yes_no '现在重启 Xray 使配置生效' yes; then
         restart_xray
@@ -1762,17 +1773,7 @@ configure_custom_routing() {
                     die '生成路由规则配置失败。'
                 }
 
-                info "检查 Xray 配置"
-                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-                    rm -f "$tmp_config"
-                    die '配置检查失败，路由规则未修改。'
-                fi
-                mv "$tmp_config" "$CONFIG_FILE"
-                chmod 644 "$CONFIG_FILE"
-                echo '自定义路由规则已添加。'
-                if yes_no '现在重启 Xray 使配置生效' yes; then
-                    restart_xray
-                fi
+                apply_config "$tmp_config" '自定义路由规则已添加。'
                 ;;
             2)
                 rule_count=$(jq -r '(.routing.rules // []) | length' "$CONFIG_FILE")
@@ -1796,17 +1797,7 @@ configure_custom_routing() {
                     rm -f "$tmp_config"
                     die '生成删除路由规则后的配置失败。'
                 }
-                info "检查 Xray 配置"
-                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-                    rm -f "$tmp_config"
-                    die '配置检查失败，路由规则未修改。'
-                fi
-                mv "$tmp_config" "$CONFIG_FILE"
-                chmod 644 "$CONFIG_FILE"
-                echo "已删除第 $del_idx 条路由规则。"
-                if yes_no '现在重启 Xray 使配置生效' yes; then
-                    restart_xray
-                fi
+                apply_config "$tmp_config" "已删除第 $del_idx 条路由规则。"
                 ;;
             3)
                 yes_no '确认清空所有路由规则？' no || continue
@@ -1815,17 +1806,7 @@ configure_custom_routing() {
                     rm -f "$tmp_config"
                     die '生成清空路由规则后的配置失败。'
                 }
-                info "检查 Xray 配置"
-                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-                    rm -f "$tmp_config"
-                    die '配置检查失败，路由规则未修改。'
-                fi
-                mv "$tmp_config" "$CONFIG_FILE"
-                chmod 644 "$CONFIG_FILE"
-                echo '已清空所有路由规则。'
-                if yes_no '现在重启 Xray 使配置生效' yes; then
-                    restart_xray
-                fi
+                apply_config "$tmp_config" '已清空所有路由规则。'
                 ;;
             *) echo '选择无效，请输入 0-3。' ;;
         esac
@@ -1847,18 +1828,6 @@ configure_custom_outbound() {
         case "$out_choice" in
             0|q|Q|'') return 0 ;;
             1)
-                editor=${EDITOR:-}
-                if [ -z "$editor" ] || ! command -v "$editor" >/dev/null 2>&1; then
-                    editor=
-                    for candidate in vim nvim vi nano; do
-                        if command -v "$candidate" >/dev/null 2>&1; then
-                            editor=$candidate
-                            break
-                        fi
-                    done
-                fi
-                [ -n "$editor" ] || die "找不到编辑器，请先安装 vi、vim 或 nano。"
-
                 out_tmp="$CONFIG_FILE.outbound.$$.json"
                 cat > "$out_tmp" <<'EOF'
 {
@@ -1875,26 +1844,11 @@ configure_custom_outbound() {
 }
 EOF
                 info "请在编辑器中修改或粘贴自定义出站 JSON，保存后退出: $out_tmp"
-                stty sane </dev/tty >/dev/tty 2>/dev/null || true
-                case "$editor" in
-                    *vim*|*nvim*)
-                        if ! "$editor" -N -n -u NONE -U NONE -i NONE "$out_tmp" </dev/tty >/dev/tty; then
-                            rm -f "$out_tmp"
-                            stty sane </dev/tty >/dev/tty 2>/dev/null || true
-                            echo '编辑器退出失败，未修改配置。'
-                            continue
-                        fi
-                        ;;
-                    *)
-                        if ! "$editor" "$out_tmp" </dev/tty >/dev/tty; then
-                            rm -f "$out_tmp"
-                            stty sane </dev/tty >/dev/tty 2>/dev/null || true
-                            echo '编辑器退出失败，未修改配置。'
-                            continue
-                        fi
-                        ;;
-                esac
-                stty sane </dev/tty >/dev/tty 2>/dev/null || true
+                if ! open_in_editor "$out_tmp"; then
+                    rm -f "$out_tmp"
+                    echo '编辑器退出失败，未修改配置。'
+                    continue
+                fi
 
                 if ! jq -e 'type == "object" and (.protocol | type == "string" and length > 0) and (.tag | type == "string" and length > 0)' "$out_tmp" >/dev/null 2>&1; then
                     rm -f "$out_tmp"
@@ -1911,19 +1865,7 @@ EOF
                     continue
                 }
                 rm -f "$out_tmp"
-
-                info "检查 Xray 配置"
-                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-                    rm -f "$tmp_config"
-                    echo '配置检查失败，自定义出站未保存。'
-                    continue
-                fi
-                mv "$tmp_config" "$CONFIG_FILE"
-                chmod 644 "$CONFIG_FILE"
-                echo "自定义出站已保存: tag=$custom_tag"
-                if yes_no '现在重启 Xray 使配置生效' yes; then
-                    restart_xray
-                fi
+                apply_config "$tmp_config" "自定义出站已保存: tag=$custom_tag"
                 ;;
             2)
                 del_tag=$(prompt_input "请输入要删除的出站 tag（可选: $(list_outbound_tags)，留空取消）" '')
@@ -1942,18 +1884,7 @@ EOF
                     echo '生成删除出站后的配置失败。'
                     continue
                 }
-                info "检查 Xray 配置"
-                if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
-                    rm -f "$tmp_config"
-                    echo '配置检查失败，出站未删除。'
-                    continue
-                fi
-                mv "$tmp_config" "$CONFIG_FILE"
-                chmod 644 "$CONFIG_FILE"
-                echo "已删除出站: $del_tag"
-                if yes_no '现在重启 Xray 使配置生效' yes; then
-                    restart_xray
-                fi
+                apply_config "$tmp_config" "已删除出站: $del_tag"
                 ;;
             *) echo '选择无效，请输入 0、1 或 2。' ;;
         esac
@@ -1984,6 +1915,13 @@ configure_outbound_menu() {
     esac
 }
 
+run_menu_action() {
+    action_fn=$1
+    if ! ( "$action_fn" ); then
+        echo '操作未完成，已返回管理菜单。'
+    fi
+}
+
 menu() {
     [ -r /dev/tty ] && [ -w /dev/tty ] || die "交互菜单需要可用的终端。"
     while :; do
@@ -1992,30 +1930,32 @@ menu() {
             '2) 配置/修改 Shadowsocks 2022' \
             '3) 配置/修改 Hysteria2' \
             '4) 配置/修改 VLESS XHTTP' \
-            '5) 重启 Xray' \
-            '6) 查看状态' \
-            '7) 查看节点和配置摘要' \
-            '8) 卸载 Xray（可选择保留备份或清空）' \
-            '9) 编辑 Xray 配置文件' \
-            '10) 删除 VLESS Reality、Shadowsocks 2022、Hysteria2 或 VLESS XHTTP' \
-            '11) 出站与出口路由设置（IP 模式 / SOCKS5 WARP）' \
+            '5) 出站与出口路由设置（IP 模式 / SOCKS5 WARP / 自定义）' \
+            '6) 查看节点和配置摘要' \
+            '7) 重启 Xray' \
+            '8) 查看状态与近期错误日志' \
+            '9) 更新 Xray 内核' \
+            '10) 编辑 Xray 配置文件' \
+            '11) 删除节点（VLESS / SS2022 / Hysteria2 / XHTTP）' \
+            '12) 卸载 Xray（可选择保留备份或清空）' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
         case "$choice" in
-            1) configure_vless ;;
-            2) configure_ss ;;
-            3) configure_hy2 ;;
-            4) configure_xhttp ;;
-            5) restart_xray ;;
-            6) show_status ;;
-            7) show_summary ;;
-            8) uninstall_xray ;;
-            9) edit_config ;;
-            10) remove_protocol ;;
-            11) configure_outbound_menu ;;
+            1) run_menu_action configure_vless ;;
+            2) run_menu_action configure_ss ;;
+            3) run_menu_action configure_hy2 ;;
+            4) run_menu_action configure_xhttp ;;
+            5) run_menu_action configure_outbound_menu ;;
+            6) run_menu_action show_summary ;;
+            7) run_menu_action restart_xray ;;
+            8) run_menu_action show_status ;;
+            9) run_menu_action update_xray ;;
+            10) run_menu_action edit_config ;;
+            11) run_menu_action remove_protocol ;;
+            12) uninstall_xray ;;
             0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-11。' ;;
+            *) echo '选择无效，请输入 0-12。' ;;
         esac
     done
 }
@@ -2038,6 +1978,7 @@ main() {
             --remove-xhttp) ACTION=remove; REMOVE_PROTO=xhttp ;;
             --restart) ACTION=restart ;;
             --status) ACTION=status ;;
+            --update) ACTION=update ;;
             --uninstall) ACTION=uninstall ;;
             --purge) PURGE_DATA=1 ;;
             --yes|-y) ASSUME_YES=1 ;;
@@ -2049,10 +1990,20 @@ main() {
     require_root
     detect_os
 
-    if [ "$ACTION" = uninstall ]; then
-        uninstall_xray
-        exit 0
-    fi
+    case "$ACTION" in
+        uninstall)
+            uninstall_xray
+            exit 0
+            ;;
+        restart)
+            restart_xray
+            exit 0
+            ;;
+        status)
+            show_status
+            exit 0
+            ;;
+    esac
 
     install_dependencies
     install_xray
@@ -2065,10 +2016,9 @@ main() {
         xhttp) configure_xhttp ;;
         outbound) configure_outbound_menu ;;
         warp) configure_socks_outbound ;;
+        update) update_xray ;;
         edit) edit_config ;;
         remove) remove_protocol ;;
-        restart) restart_xray ;;
-        status) show_status ;;
         '') menu ;;
     esac
 }
