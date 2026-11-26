@@ -1,5 +1,5 @@
 #!/bin/sh
-# Interactive Xray manager for VLESS REALITY, Shadowsocks 2022 and Hysteria2.
+# Interactive Xray manager for VLESS REALITY, VLESS XHTTP, Shadowsocks 2022 and Hysteria2.
 # Supports Debian/Ubuntu (systemd) and Alpine (OpenRC).
 
 set -eu
@@ -29,11 +29,13 @@ usage() {
   sh xray.sh --vless         直接配置/修改 VLESS Reality
   sh xray.sh --ss            直接配置/修改 Shadowsocks 2022
   sh xray.sh --hy2           直接配置/修改 Hysteria2
+  sh xray.sh --xhttp         直接配置/修改 VLESS XHTTP
   sh xray.sh --edit          编辑并检查 Xray 配置文件
-  sh xray.sh --remove        交互选择并删除 VLESS、SS2022 或 Hysteria2
+  sh xray.sh --remove        交互选择并删除 VLESS、SS2022、Hysteria2 或 XHTTP
   sh xray.sh --remove-vless  删除 VLESS Reality 入站
   sh xray.sh --remove-ss     删除 Shadowsocks 2022 入站
   sh xray.sh --remove-hy2    删除 Hysteria2 入站
+  sh xray.sh --remove-xhttp  删除 VLESS XHTTP 入站
   sh xray.sh --restart       重启 Xray
   sh xray.sh --status        查看 Xray 状态
   sh xray.sh --uninstall     停止并卸载 Xray（会先备份）
@@ -244,6 +246,65 @@ get_hy2_password() {
     jq -r 'first(.inbounds[]? | select(.tag == "hysteria2-in" or .tag == "hy2-in") | (.streamSettings.hysteriaSettings.auth // .settings.users[0].auth // .settings.clients[0].auth)) // empty' "$CONFIG_FILE"
 }
 
+get_xhttp_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .[$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_xhttp_uuid() {
+    jq -r 'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .settings.clients[0].id) // empty' "$CONFIG_FILE"
+}
+
+get_xhttp_setting() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.xhttpSettings[$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_xhttp_security() {
+    jq -r 'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.security) // empty' "$CONFIG_FILE"
+}
+
+get_xhttp_reality_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.realitySettings[$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_xhttp_reality_sni() {
+    jq -r 'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | (.streamSettings.realitySettings.serverNames[0] // .streamSettings.realitySettings.serverName)) // empty' "$CONFIG_FILE"
+}
+
+get_xhttp_reality_short_id() {
+    jq -r 'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.realitySettings.shortIds[0]) // empty' "$CONFIG_FILE"
+}
+
+get_xhttp_tls_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.tlsSettings[$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_xhttp_certificate_field() {
+    field=$1
+    jq -r --arg field "$field" \
+        'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.tlsSettings.certificates[0][$field]) // empty' \
+        "$CONFIG_FILE"
+}
+
+get_xhttp_extra() {
+    jq -rc 'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.xhttpSettings.extra) | if type == "object" and length > 0 then tojson else empty end' "$CONFIG_FILE"
+}
+
+get_xhttp_trusted_xff() {
+    jq -r 'first(.inbounds[]? | select(.tag == "vless-xhttp-in" or .tag == "xhttp-in") | .streamSettings.sockopt.trustedXForwardedFor) | if type == "array" then join(",") elif type == "string" then . else empty end' "$CONFIG_FILE"
+}
+
 detect_server_address() {
     detected_address=
     if command -v ip >/dev/null 2>&1; then
@@ -264,15 +325,21 @@ detect_server_address() {
     printf '%s' "$detected_address"
 }
 
+format_url_host() {
+    host_value=$1
+    case "$host_value" in
+        \[*\]) printf '%s' "$host_value" ;;
+        *:*) printf '[%s]' "$host_value" ;;
+        *) printf '%s' "$host_value" ;;
+    esac
+}
+
 make_ss_url() {
     server_address=$1
     ss_port_value=$2
     ss_method_value=$3
     ss_password_value=$4
-    ss_host=$server_address
-    case "$ss_host" in
-        *:*) ss_host="[$ss_host]" ;;
-    esac
+    ss_host=$(format_url_host "$server_address")
     ss_userinfo=$(printf '%s' "$ss_method_value:$ss_password_value" | openssl base64 -A | tr '+/' '-_' | tr -d '=')
     SS_URL="ss://$ss_userinfo@$ss_host:$ss_port_value#ss2022"
 }
@@ -282,17 +349,60 @@ urlencode() {
 }
 
 make_hy2_url() {
-    hy2_host=$1
+    hy2_host=$(format_url_host "$1")
     hy2_port_value=$2
     hy2_password_value=$3
     hy2_sni_value=$4
-    case "$hy2_host" in
-        \[*\]) : ;;
-        *:*) hy2_host="[$hy2_host]" ;;
-    esac
+    hy2_mport_value=${5:-}
     hy2_password_encoded=$(urlencode "$hy2_password_value")
     hy2_sni_encoded=$(urlencode "$hy2_sni_value")
-    HY2_URL="hysteria2://$hy2_password_encoded@$hy2_host:$hy2_port_value/?sni=$hy2_sni_encoded&alpn=h3#hysteria2"
+    hy2_query="sni=$hy2_sni_encoded&alpn=h3"
+    if [ -n "$hy2_mport_value" ]; then
+        hy2_query="$hy2_query&mport=$hy2_mport_value"
+    fi
+    HY2_URL="hysteria2://$hy2_password_encoded@$hy2_host:$hy2_port_value/?$hy2_query#hysteria2"
+}
+
+make_xhttp_url() {
+    xhttp_host_addr=$(format_url_host "$1")
+    xhttp_port_val=$2
+    xhttp_uuid_val=$3
+    xhttp_path_val=$4
+    xhttp_mode_val=$5
+    xhttp_sec_val=$6
+    xhttp_sni_val=$7
+    xhttp_pbk_val=$8
+    xhttp_sid_val=$9
+    shift 9
+    xhttp_http_host=${1:-}
+    xhttp_extra_val=${2:-}
+
+    xhttp_path_enc=$(urlencode "$xhttp_path_val")
+    xhttp_mode_enc=$(urlencode "$xhttp_mode_val")
+    xhttp_query="encryption=none&type=xhttp&path=$xhttp_path_enc&mode=$xhttp_mode_enc"
+    if [ -n "$xhttp_http_host" ]; then
+        xhttp_http_host_enc=$(urlencode "$xhttp_http_host")
+        xhttp_query="$xhttp_query&host=$xhttp_http_host_enc"
+    fi
+
+    case "$xhttp_sec_val" in
+        reality)
+            xhttp_sni_enc=$(urlencode "$xhttp_sni_val")
+            xhttp_query="$xhttp_query&security=reality&sni=$xhttp_sni_enc&fp=chrome&pbk=$xhttp_pbk_val&sid=$xhttp_sid_val"
+            ;;
+        tls)
+            xhttp_sni_enc=$(urlencode "$xhttp_sni_val")
+            xhttp_query="$xhttp_query&security=tls&sni=$xhttp_sni_enc&fp=chrome"
+            ;;
+        *)
+            xhttp_query="$xhttp_query&security=none"
+            ;;
+    esac
+    if [ -n "$xhttp_extra_val" ] && [ "$xhttp_extra_val" != "{}" ]; then
+        xhttp_extra_enc=$(urlencode "$xhttp_extra_val")
+        xhttp_query="$xhttp_query&extra=$xhttp_extra_enc"
+    fi
+    XHTTP_URL="vless://$xhttp_uuid_val@$xhttp_host_addr:$xhttp_port_val?$xhttp_query#vless-xhttp"
 }
 
 show_terminal_qr() {
@@ -338,15 +448,49 @@ show_hy2_node() {
     node_sni=$(get_node_field hy2 sni)
     node_cert=$(get_node_field hy2 certificateFile)
     node_key=$(get_node_field hy2 keyFile)
+    node_mport=$(get_node_field hy2 mport)
     [ -n "$node_address" ] && [ -n "$node_port" ] && [ -n "$node_password" ] && [ -n "$node_sni" ] || return 0
-    make_hy2_url "$node_address" "$node_port" "$node_password" "$node_sni"
+    make_hy2_url "$node_address" "$node_port" "$node_password" "$node_sni" "$node_mport"
     echo
     echo '=== Hysteria2 节点 ==='
     echo "$HY2_URL"
     echo "SNI: $node_sni"
     echo "证书: $node_cert"
     echo "私钥: $node_key"
+    [ -z "$node_mport" ] || echo "端口跳跃: $node_mport"
     show_terminal_qr hysteria2 "$HY2_URL"
+}
+
+show_xhttp_node() {
+    node_address=$(get_node_field xhttp address)
+    node_port=$(get_node_field xhttp port)
+    node_uuid=$(get_node_field xhttp uuid)
+    node_path=$(get_node_field xhttp path)
+    node_mode=$(get_node_field xhttp mode)
+    node_security=$(get_node_field xhttp security)
+    node_sni=$(get_node_field xhttp sni)
+    node_pbk=$(get_node_field xhttp publicKey)
+    node_sid=$(get_node_field xhttp shortId)
+    node_host=$(get_node_field xhttp host)
+    node_extra=$(get_xhttp_extra)
+    node_xff=$(get_xhttp_trusted_xff)
+    if [ -n "$node_address" ] && [ -n "$node_port" ] && [ -n "$node_uuid" ] && [ -n "$node_path" ]; then
+        make_xhttp_url "$node_address" "$node_port" "$node_uuid" "$node_path" "${node_mode:-auto}" "${node_security:-none}" "$node_sni" "$node_pbk" "$node_sid" "$node_host" "$node_extra"
+        node_url=$XHTTP_URL
+    else
+        node_url=$(get_node_field xhttp url)
+    fi
+    [ -n "$node_url" ] || return 0
+    echo
+    echo '=== VLESS XHTTP 节点 ==='
+    echo "$node_url"
+    echo "路径: $node_path"
+    echo "模式: $node_mode"
+    echo "传输安全: $node_security"
+    [ -z "$node_host" ] || echo "Host: $node_host"
+    [ -z "$node_xff" ] || echo "信任 XFF 头部: $node_xff"
+    [ -z "$node_extra" ] || echo "Extra: $node_extra"
+    show_terminal_qr vless-xhttp "$node_url"
 }
 
 get_vless_short_id() {
@@ -358,6 +502,58 @@ is_port() {
         ''|*[!0-9]*) return 1 ;;
     esac
     [ "$1" -ge 1 ] 2>/dev/null && [ "$1" -le 65535 ] 2>/dev/null
+}
+
+is_valid_mport() {
+    mport_val=$1
+    [ -n "$mport_val" ] || return 1
+    case "$mport_val" in
+        ,*|*,,*|*,|*[![0-9,-]*) return 1 ;;
+    esac
+    saved_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086
+    set -- $mport_val
+    IFS=$saved_ifs
+    for seg in "$@"; do
+        case "$seg" in
+            *-*)
+                seg_start=${seg%%-*}
+                seg_end=${seg#*-}
+                case "$seg_end" in
+                    *-*) return 1 ;;
+                esac
+                is_port "$seg_start" && is_port "$seg_end" && [ "$seg_start" -lt "$seg_end" ] || return 1
+                ;;
+            *)
+                is_port "$seg" || return 1
+                ;;
+        esac
+    done
+    return 0
+}
+
+print_hy2_hopping_commands() {
+    target_port=$1
+    hop_mport=$2
+    echo
+    echo "=== Hysteria2 端口跳跃防火墙转发参考（脚本不会自动修改防火墙） ==="
+    echo "请先在云服务器安全组与系统防火墙放行 UDP 端口: $hop_mport"
+    echo "方式 1（nftables，推荐）:"
+    echo "  nft add table inet hy2_hop"
+    echo "  nft 'add chain inet hy2_hop prerouting { type nat hook prerouting priority dstnat; policy accept; }'"
+    echo "  nft add rule inet hy2_hop prerouting udp dport { $hop_mport } redirect to :$target_port"
+    echo "方式 2（iptables / ip6tables）:"
+    saved_ifs=$IFS
+    IFS=,
+    # shellcheck disable=SC2086
+    set -- $hop_mport
+    IFS=$saved_ifs
+    for seg in "$@"; do
+        ipt_seg=$(printf '%s' "$seg" | tr '-' ':')
+        echo "  iptables -t nat -A PREROUTING -p udp --dport $ipt_seg -j REDIRECT --to-ports $target_port"
+        echo "  ip6tables -t nat -A PREROUTING -p udp --dport $ipt_seg -j REDIRECT --to-ports $target_port"
+    done
 }
 
 is_safe_value() {
@@ -541,15 +737,127 @@ generate_uuid() {
 generate_reality_keys() {
     key_output=$($XRAY_BIN x25519 2>/dev/null) || die "无法生成 Reality 密钥。"
     REALITY_PRIVATE_KEY=$(printf '%s\n' "$key_output" | awk -F': *' 'tolower($1) ~ /private/ {print $2; exit}')
-    REALITY_PUBLIC_KEY=$(printf '%s\n' "$key_output" | awk -F': *' 'tolower($1) ~ /password/ {print $2; exit}')
+    REALITY_PUBLIC_KEY=$(printf '%s\n' "$key_output" | awk -F': *' 'tolower($1) ~ /password|public/ {print $2; exit}')
     [ -n "$REALITY_PRIVATE_KEY" ] || die "无法解析 Reality private key。"
     [ -n "$REALITY_PUBLIC_KEY" ] || die "无法解析 Reality public key。"
 }
 
 derive_reality_public_key() {
     key_output=$($XRAY_BIN x25519 -i "$REALITY_PRIVATE_KEY" 2>/dev/null) || die "无法从现有 private key 生成 public key。"
-    REALITY_PUBLIC_KEY=$(printf '%s\n' "$key_output" | awk -F': *' 'tolower($1) ~ /password/ {print $2; exit}')
+    REALITY_PUBLIC_KEY=$(printf '%s\n' "$key_output" | awk -F': *' 'tolower($1) ~ /password|public/ {print $2; exit}')
     [ -n "$REALITY_PUBLIC_KEY" ] || die "无法解析 Reality public key。"
+}
+
+warn_cert_permissions() {
+    cert_path=$1
+    if command -v ls >/dev/null 2>&1; then
+        perms=$(ls -ldL "$cert_path" 2>/dev/null | awk '{print $1}')
+        case "$perms" in
+            ????????r?) : ;;
+            *) info "提示: $cert_path 当前对非 root 用户不可读（$perms）；若 Xray 以 nobody 等非 root 用户运行，请确保服务用户有读取权限。" ;;
+        esac
+    fi
+}
+
+ss_method_key_bytes() {
+    case "$1" in
+        2022-blake3-aes-128-gcm) printf '16' ;;
+        *) printf '32' ;;
+    esac
+}
+
+normalize_xhttp_path() {
+    case "$1" in
+        /*) printf '%s' "$1" ;;
+        *) printf '/%s' "$1" ;;
+    esac
+}
+
+is_safe_xhttp_path() {
+    case "$1" in
+        ''|/*[![:alnum:]/._~-]*) return 1 ;;
+        /*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+choose_xhttp_mode() {
+    default_mode=$1
+    case "$default_mode" in
+        packet-up) default_choice=2 ;;
+        stream-up) default_choice=3 ;;
+        stream-one) default_choice=4 ;;
+        *) default_choice=1 ;;
+    esac
+    printf '%s\n' \
+        'XHTTP 传输模式:' \
+        '  1) auto        自动协商（推荐）' \
+        '  2) packet-up   分包上行，CDN/反代兼容性最好' \
+        '  3) stream-up   流式上行，上下行分离' \
+        '  4) stream-one  单连接双向流' > /dev/tty
+    choice=$(prompt_input '请选择' "$default_choice")
+    case "$choice" in
+        1|auto) XHTTP_MODE=auto ;;
+        2|packet-up) XHTTP_MODE=packet-up ;;
+        3|stream-up) XHTTP_MODE=stream-up ;;
+        4|stream-one) XHTTP_MODE=stream-one ;;
+        *) die "XHTTP 模式选择无效，请输入 1、2、3 或 4。" ;;
+    esac
+}
+
+choose_xhttp_security() {
+    default_sec=$1
+    case "$default_sec" in
+        tls) default_choice=2 ;;
+        none) default_choice=3 ;;
+        *) default_choice=1 ;;
+    esac
+    printf '%s\n' \
+        'XHTTP 传输安全:' \
+        '  1) reality  无需证书，直连推荐' \
+        '  2) tls      使用已有 TLS 证书' \
+        '  3) none     无 TLS（仅配合 Nginx/Caddy/CDN 反代）' > /dev/tty
+    choice=$(prompt_input '请选择' "$default_choice")
+    case "$choice" in
+        1|reality) XHTTP_SECURITY=reality ;;
+        2|tls) XHTTP_SECURITY=tls ;;
+        3|none) XHTTP_SECURITY=none ;;
+        *) die "XHTTP 传输安全选择无效，请输入 1、2 或 3。" ;;
+    esac
+}
+
+is_safe_xff_list() {
+    case "$1" in
+        *[![:alnum:],_-]*) return 1 ;;
+    esac
+    return 0
+}
+
+choose_xhttp_xff() {
+    default_xff=$1
+    case "$default_xff" in
+        '') default_choice=0 ;;
+        CF-Connecting-IP) default_choice=1 ;;
+        X-Forwarded-For) default_choice=2 ;;
+        *) default_choice=$default_xff ;;
+    esac
+    printf '%s\n' \
+        '信任的 XFF 头部（仅 CDN/反代获取真实 IP 时需要，直连请选 0）:' \
+        '  0) 不设置（默认）' \
+        '  1) CF-Connecting-IP  Cloudflare CDN' \
+        '  2) X-Forwarded-For   Nginx / Caddy 等反代' \
+        '  也可直接输入自定义头部名（多个用逗号分隔）' > /dev/tty
+    choice=$(prompt_input '请选择或输入头部名' "$default_choice")
+    case "$choice" in
+        ''|0|none) XHTTP_XFF= ;;
+        1) XHTTP_XFF=CF-Connecting-IP ;;
+        2) XHTTP_XFF=X-Forwarded-For ;;
+        *)
+            cleaned_xff=$(printf '%s' "$choice" | tr -d '[:space:]')
+            is_safe_xff_list "$cleaned_xff" || die "XFF 头部名称包含不支持的字符（仅支持字母、数字、-、_ 和逗号）。"
+            XHTTP_XFF=$cleaned_xff
+            ;;
+    esac
 }
 
 save_node() {
@@ -583,7 +891,10 @@ write_config() {
           end)' "$CONFIG_FILE" > "$tmp_config"
 
     info "检查 Xray 配置"
-    "$XRAY_BIN" run -test -format json -config "$tmp_config"
+    if ! "$XRAY_BIN" run -test -format json -config "$tmp_config"; then
+        rm -f "$tmp_config"
+        die "配置检查失败，正式配置未修改。"
+    fi
     mv "$tmp_config" "$CONFIG_FILE"
     chmod 644 "$CONFIG_FILE"
     echo "配置已保存: $CONFIG_FILE"
@@ -671,14 +982,16 @@ remove_protocol() {
             '  1) VLESS Reality' \
             '  2) Shadowsocks 2022' \
             '  3) Hysteria2' \
+            '  4) VLESS XHTTP' \
             '  0) 取消' > /dev/tty
         remove_choice=$(prompt_input '请选择' '')
         case "$remove_choice" in
             1|vless) remove_choice=vless ;;
             2|ss|ss2022) remove_choice=ss2022 ;;
             3|hy2|hysteria2) remove_choice=hy2 ;;
+            4|xhttp) remove_choice=xhttp ;;
             0|q|Q) echo '已取消删除。'; return 0 ;;
-            *) die '删除选项无效，请输入 1、2、3 或 0。' ;;
+            *) die '删除选项无效，请输入 1、2、3、4 或 0。' ;;
         esac
     fi
 
@@ -697,6 +1010,11 @@ remove_protocol() {
             remove_one=hysteria2-in
             remove_two=hy2-in
             remove_title='Hysteria2'
+            ;;
+        xhttp)
+            remove_one=vless-xhttp-in
+            remove_two=xhttp-in
+            remove_title='VLESS XHTTP'
             ;;
         *) die "不支持的删除协议: $remove_choice" ;;
     esac
@@ -812,6 +1130,7 @@ uninstall_xray() {
         echo "备份目录: $UNINSTALL_BACKUP"
     fi
     echo "系统依赖（curl、openssl、jq 等）未删除。"
+    exit 0
 }
 
 show_status() {
@@ -833,6 +1152,7 @@ show_summary() {
     show_vless_node
     show_ss_node
     show_hy2_node
+    show_xhttp_node
     echo
 }
 
@@ -887,10 +1207,7 @@ configure_vless() {
         '{tag:"vless-reality-in", listen:$listen, port:($port|tonumber), protocol:"vless", settings:{clients:[{id:$uuid,flow:$flow,email:"vless-reality"}],decryption:"none"}, streamSettings:{network:"raw",security:"reality",realitySettings:{show:false,target:$target,xver:0,serverNames:[$sni],privateKey:$private_key,shortIds:[$short_id]}}, sniffing:{enabled:true,destOverride:["http","tls","quic"]}}')
     write_config "$inbound_json" vless-reality-in vless-in
 
-    client_host=$SERVER_ADDRESS
-    case "$client_host" in
-        *:*) client_host="[$client_host]" ;;
-    esac
+    client_host=$(format_url_host "$SERVER_ADDRESS")
     vless_url="vless://$VLESS_UUID@$client_host:$VLESS_PORT?encryption=none&security=reality&sni=$SERVER_NAME&fp=chrome&pbk=$REALITY_PUBLIC_KEY&sid=$SHORT_ID&type=tcp&flow=$FLOW#vless-reality"
     show_terminal_qr vless-reality "$vless_url"
     node_json=$(jq -n \
@@ -925,13 +1242,15 @@ configure_ss() {
     is_port "$SS_PORT" || die "SS2022 端口无效。"
     validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
 
-    if [ -n "$old_password" ] && yes_no '保留现有 SS2022 密码' yes; then
+    old_key_bytes=$(ss_method_key_bytes "${old_method:-}")
+    new_key_bytes=$(ss_method_key_bytes "$SS_METHOD")
+    if [ -n "$old_password" ] && [ -n "$old_method" ] && [ "$old_key_bytes" = "$new_key_bytes" ] && yes_no '保留现有 SS2022 密码' yes; then
         SS_PASSWORD=$old_password
     else
-        case "$SS_METHOD" in
-            2022-blake3-aes-128-gcm) SS_PASSWORD=$(openssl rand -base64 16 | tr -d '\n') ;;
-            *) SS_PASSWORD=$(openssl rand -base64 32 | tr -d '\n') ;;
-        esac
+        if [ -n "$old_password" ] && [ -n "$old_method" ] && [ "$old_key_bytes" != "$new_key_bytes" ]; then
+            info "加密方式密钥长度从 ${old_key_bytes}B 变为 ${new_key_bytes}B，已自动重新生成 SS2022 密码"
+        fi
+        SS_PASSWORD=$(openssl rand -base64 "$new_key_bytes" | tr -d '\n')
     fi
 
     inbound_json=$(jq -n \
@@ -968,6 +1287,7 @@ configure_hy2() {
     old_cert=$(get_hy2_certificate_field certificateFile)
     old_key=$(get_hy2_certificate_field keyFile)
     old_password=$(get_hy2_password)
+    old_mport=$(get_node_field hy2 mport)
     echo
     echo '=== 配置/修改 Hysteria2 ==='
     SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于节点参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
@@ -976,26 +1296,35 @@ configure_hy2() {
     HY2_CERT_FILE=$(prompt_input 'TLS 证书文件完整路径' "$old_cert")
     HY2_KEY_FILE=$(prompt_input 'TLS 私钥文件完整路径' "$old_key")
     HY2_PASSWORD=$(prompt_input 'Hysteria2 密码' "${old_password:-$(openssl rand -hex 16)}")
+    HY2_MPORT=$(prompt_input '端口跳跃范围（可选，如 20000-50000，留空不启用，输入 none 清除）' "$old_mport")
+    case "$HY2_MPORT" in
+        none|NONE|-) HY2_MPORT= ;;
+        *) HY2_MPORT=$(printf '%s' "$HY2_MPORT" | tr -d '[:space:]') ;;
+    esac
 
     is_port "$HY2_PORT" || die "Hysteria2 端口无效。"
     validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
     is_safe_value "$HY2_SNI" || die "TLS SNI 包含不支持的字符。"
     [ -n "$HY2_PASSWORD" ] || die "Hysteria2 密码不能为空。"
+    [ -z "$HY2_MPORT" ] || is_valid_mport "$HY2_MPORT" || die "端口跳跃范围格式无效，请填写如 20000-50000 或 20000-30000,40000-50000。"
     [ -r "$HY2_CERT_FILE" ] || die "证书文件不可读: $HY2_CERT_FILE"
     [ -r "$HY2_KEY_FILE" ] || die "私钥文件不可读: $HY2_KEY_FILE"
+    warn_cert_permissions "$HY2_CERT_FILE"
+    warn_cert_permissions "$HY2_KEY_FILE"
 
     inbound_json=$(jq -n \
         --arg listen "::" --arg port "$HY2_PORT" --arg password "$HY2_PASSWORD" \
         --arg sni "$HY2_SNI" --arg cert "$HY2_CERT_FILE" --arg key "$HY2_KEY_FILE" \
         '{tag:"hysteria2-in",listen:$listen,port:($port|tonumber),protocol:"hysteria",settings:{version:2},streamSettings:{network:"hysteria",security:"tls",tlsSettings:{serverName:$sni,alpn:["h3"],certificates:[{usage:"encipherment",certificateFile:$cert,keyFile:$key}]},hysteriaSettings:{version:2,auth:$password}}}')
     write_config "$inbound_json" hysteria2-in hy2-in
-    make_hy2_url "$SERVER_ADDRESS" "$HY2_PORT" "$HY2_PASSWORD" "$HY2_SNI"
+    make_hy2_url "$SERVER_ADDRESS" "$HY2_PORT" "$HY2_PASSWORD" "$HY2_SNI" "$HY2_MPORT"
     show_terminal_qr hysteria2 "$HY2_URL"
     node_json=$(jq -n \
         --arg address "$SERVER_ADDRESS" --arg port "$HY2_PORT" \
         --arg password "$HY2_PASSWORD" --arg sni "$HY2_SNI" \
-        --arg cert "$HY2_CERT_FILE" --arg key "$HY2_KEY_FILE" --arg url "$HY2_URL" \
-        '{address:$address,port:($port|tonumber),password:$password,sni:$sni,certificateFile:$cert,keyFile:$key,url:$url}')
+        --arg cert "$HY2_CERT_FILE" --arg key "$HY2_KEY_FILE" \
+        --arg mport "$HY2_MPORT" --arg url "$HY2_URL" \
+        '{address:$address,port:($port|tonumber),password:$password,sni:$sni,certificateFile:$cert,keyFile:$key,mport:$mport,url:$url}')
     save_node hy2 "$node_json"
     echo
     echo 'Hysteria2 节点参数已保存:'
@@ -1005,7 +1334,174 @@ configure_hy2() {
     echo "证书: $HY2_CERT_FILE"
     echo "私钥: $HY2_KEY_FILE"
     echo "密码: $HY2_PASSWORD"
+    [ -z "$HY2_MPORT" ] || echo "端口跳跃: $HY2_MPORT"
     echo "$HY2_URL"
+    [ -z "$HY2_MPORT" ] || print_hy2_hopping_commands "$HY2_PORT" "$HY2_MPORT"
+    if yes_no '现在重启 Xray 使配置生效' yes; then
+        restart_xray
+    fi
+}
+
+configure_xhttp() {
+    old_port=$(get_xhttp_field port)
+    old_listen=$(get_xhttp_field listen)
+    old_uuid=$(get_xhttp_uuid)
+    old_path=$(get_xhttp_setting path)
+    old_host=$(get_xhttp_setting host)
+    old_mode=$(get_xhttp_setting mode)
+    old_security=$(get_xhttp_security)
+    old_target=$(get_xhttp_reality_field target)
+    [ -n "$old_target" ] || old_target=$(get_xhttp_reality_field dest)
+    old_reality_sni=$(get_xhttp_reality_sni)
+    old_private=$(get_xhttp_reality_field privateKey)
+    old_short_id=$(get_xhttp_reality_short_id)
+    old_tls_sni=$(get_xhttp_tls_field serverName)
+    old_cert=$(get_xhttp_certificate_field certificateFile)
+    old_key=$(get_xhttp_certificate_field keyFile)
+    old_extra=$(get_xhttp_extra)
+    old_xff=$(get_xhttp_trusted_xff)
+    old_address=$(get_node_field xhttp address)
+    case "$old_address" in
+        YOUR_SERVER_IP_OR_DOMAIN) old_address= ;;
+    esac
+    detected_address=$(detect_server_address)
+    default_path=${old_path:-"/$(openssl rand -hex 6)"}
+
+    echo
+    echo '=== 配置/修改 VLESS XHTTP ==='
+    SERVER_ADDRESS=$(prompt_input '服务器域名或 IP（仅用于生成客户端参数，默认读取本机网卡）' "${old_address:-${detected_address:-YOUR_SERVER_IP_OR_DOMAIN}}")
+    XHTTP_PORT=$(prompt_input 'VLESS XHTTP 端口' "${old_port:-443}")
+    XHTTP_PATH=$(prompt_input 'XHTTP 路径（如 /xhttp）' "$default_path")
+    XHTTP_PATH=$(normalize_xhttp_path "$XHTTP_PATH")
+    XHTTP_HOST=$(prompt_input 'XHTTP Host（可选，直接回车留空）' "$old_host")
+    choose_xhttp_mode "${old_mode:-auto}"
+    choose_xhttp_security "${old_security:-reality}"
+
+    is_port "$XHTTP_PORT" || die "VLESS XHTTP 端口无效。"
+    validate_server_address "$SERVER_ADDRESS" || die "服务器地址格式无效：请填写域名、有效 IPv4 或 IPv6 地址；IPv4 每段必须为 0-255。"
+    is_safe_xhttp_path "$XHTTP_PATH" || die "XHTTP 路径包含不支持的字符（仅支持字母、数字及 / . _ ~ -）。"
+    if [ -n "$XHTTP_HOST" ]; then
+        is_safe_value "$XHTTP_HOST" || die "XHTTP Host 包含不支持的字符。"
+    fi
+
+    XHTTP_LISTEN='::'
+    XHTTP_SNI=
+    XHTTP_TARGET=
+    XHTTP_CERT_FILE=
+    XHTTP_KEY_FILE=
+    XHTTP_XFF=
+    REALITY_PRIVATE_KEY=
+    REALITY_PUBLIC_KEY=
+    SHORT_ID=
+
+    case "$XHTTP_SECURITY" in
+        reality)
+            XHTTP_TARGET=$(prompt_input 'Reality 伪装目标域名或 HOST:PORT' "${old_target:-www.apple.com:443}")
+            XHTTP_TARGET=$(normalize_target "$XHTTP_TARGET")
+            XHTTP_SNI=$(prompt_input 'Reality SNI' "${old_reality_sni:-$(derive_server_name "$XHTTP_TARGET")}")
+            is_safe_value "$XHTTP_TARGET" || die "Reality 目标包含不安全字符。"
+            is_safe_value "$XHTTP_SNI" || die "Reality SNI 包含不安全字符。"
+            if [ -n "$old_private" ] && yes_no '保留现有 UUID 和 Reality 密钥' yes; then
+                XHTTP_UUID=${old_uuid:-$(generate_uuid)}
+                REALITY_PRIVATE_KEY=$old_private
+                derive_reality_public_key
+                SHORT_ID=${old_short_id:-$(openssl rand -hex 8 | tr -d '\n')}
+            else
+                XHTTP_UUID=$(generate_uuid)
+                SHORT_ID=$(openssl rand -hex 8 | tr -d '\n')
+                generate_reality_keys
+            fi
+            inbound_json=$(jq -n \
+                --arg listen "$XHTTP_LISTEN" \
+                --arg port "$XHTTP_PORT" \
+                --arg uuid "$XHTTP_UUID" \
+                --arg path "$XHTTP_PATH" \
+                --arg host "$XHTTP_HOST" \
+                --arg mode "$XHTTP_MODE" \
+                --arg extra "$old_extra" \
+                --arg target "$XHTTP_TARGET" \
+                --arg sni "$XHTTP_SNI" \
+                --arg private_key "$REALITY_PRIVATE_KEY" \
+                --arg short_id "$SHORT_ID" \
+                '{tag:"vless-xhttp-in", listen:$listen, port:($port|tonumber), protocol:"vless", settings:{clients:[{id:$uuid,email:"vless-xhttp"}],decryption:"none"}, streamSettings:{network:"xhttp",security:"reality",xhttpSettings:({path:$path,mode:$mode} + (if $host != "" then {host:$host} else {} end) + (if $extra != "" then {extra:($extra|fromjson)} else {} end)),realitySettings:{show:false,target:$target,xver:0,serverNames:[$sni],privateKey:$private_key,shortIds:[$short_id]}}, sniffing:{enabled:true,destOverride:["http","tls","quic"]}}')
+            ;;
+        tls)
+            XHTTP_SNI=$(prompt_input 'TLS SNI/证书域名' "${old_tls_sni:-$SERVER_ADDRESS}")
+            XHTTP_CERT_FILE=$(prompt_input 'TLS 证书文件完整路径' "$old_cert")
+            XHTTP_KEY_FILE=$(prompt_input 'TLS 私钥文件完整路径' "$old_key")
+            choose_xhttp_xff "$old_xff"
+            is_safe_value "$XHTTP_SNI" || die "TLS SNI 包含不支持的字符。"
+            [ -r "$XHTTP_CERT_FILE" ] || die "证书文件不可读: $XHTTP_CERT_FILE"
+            [ -r "$XHTTP_KEY_FILE" ] || die "私钥文件不可读: $XHTTP_KEY_FILE"
+            warn_cert_permissions "$XHTTP_CERT_FILE"
+            warn_cert_permissions "$XHTTP_KEY_FILE"
+            if [ -n "$old_uuid" ] && yes_no '保留现有 UUID' yes; then
+                XHTTP_UUID=$old_uuid
+            else
+                XHTTP_UUID=$(generate_uuid)
+            fi
+            inbound_json=$(jq -n \
+                --arg listen "$XHTTP_LISTEN" \
+                --arg port "$XHTTP_PORT" \
+                --arg uuid "$XHTTP_UUID" \
+                --arg path "$XHTTP_PATH" \
+                --arg host "$XHTTP_HOST" \
+                --arg mode "$XHTTP_MODE" \
+                --arg extra "$old_extra" \
+                --arg xff "$XHTTP_XFF" \
+                --arg sni "$XHTTP_SNI" \
+                --arg cert "$XHTTP_CERT_FILE" \
+                --arg key "$XHTTP_KEY_FILE" \
+                '{tag:"vless-xhttp-in", listen:$listen, port:($port|tonumber), protocol:"vless", settings:{clients:[{id:$uuid,email:"vless-xhttp"}],decryption:"none"}, streamSettings:({network:"xhttp",security:"tls",xhttpSettings:({path:$path,mode:$mode} + (if $host != "" then {host:$host} else {} end) + (if $extra != "" then {extra:($extra|fromjson)} else {} end)),tlsSettings:{serverName:$sni,alpn:["h2","http/1.1"],certificates:[{usage:"encipherment",certificateFile:$cert,keyFile:$key}]}} + (if $xff != "" then {sockopt:{trustedXForwardedFor:($xff|split(",")|map(select(length>0)))}} else {} end)), sniffing:{enabled:true,destOverride:["http","tls","quic"]}}')
+            ;;
+        none)
+            XHTTP_LISTEN=$(prompt_input '监听地址（本机反代推荐 127.0.0.1）' "${old_listen:-127.0.0.1}")
+            is_safe_value "$XHTTP_LISTEN" || die "监听地址包含不支持的字符。"
+            choose_xhttp_xff "$old_xff"
+            if [ -n "$old_uuid" ] && yes_no '保留现有 UUID' yes; then
+                XHTTP_UUID=$old_uuid
+            else
+                XHTTP_UUID=$(generate_uuid)
+            fi
+            inbound_json=$(jq -n \
+                --arg listen "$XHTTP_LISTEN" \
+                --arg port "$XHTTP_PORT" \
+                --arg uuid "$XHTTP_UUID" \
+                --arg path "$XHTTP_PATH" \
+                --arg host "$XHTTP_HOST" \
+                --arg mode "$XHTTP_MODE" \
+                --arg extra "$old_extra" \
+                --arg xff "$XHTTP_XFF" \
+                '{tag:"vless-xhttp-in", listen:$listen, port:($port|tonumber), protocol:"vless", settings:{clients:[{id:$uuid,email:"vless-xhttp"}],decryption:"none"}, streamSettings:({network:"xhttp",security:"none",xhttpSettings:({path:$path,mode:$mode} + (if $host != "" then {host:$host} else {} end) + (if $extra != "" then {extra:($extra|fromjson)} else {} end))} + (if $xff != "" then {sockopt:{trustedXForwardedFor:($xff|split(",")|map(select(length>0)))}} else {} end)), sniffing:{enabled:true,destOverride:["http","tls","quic"]}}')
+            ;;
+    esac
+
+    write_config "$inbound_json" vless-xhttp-in xhttp-in
+    make_xhttp_url "$SERVER_ADDRESS" "$XHTTP_PORT" "$XHTTP_UUID" "$XHTTP_PATH" "$XHTTP_MODE" "$XHTTP_SECURITY" "$XHTTP_SNI" "$REALITY_PUBLIC_KEY" "$SHORT_ID" "$XHTTP_HOST" "$old_extra"
+    show_terminal_qr vless-xhttp "$XHTTP_URL"
+    node_json=$(jq -n \
+        --arg address "$SERVER_ADDRESS" --arg port "$XHTTP_PORT" \
+        --arg listen "$XHTTP_LISTEN" --arg uuid "$XHTTP_UUID" \
+        --arg path "$XHTTP_PATH" --arg host "$XHTTP_HOST" \
+        --arg mode "$XHTTP_MODE" --arg security "$XHTTP_SECURITY" \
+        --arg xff "$XHTTP_XFF" \
+        --arg sni "$XHTTP_SNI" --arg target "$XHTTP_TARGET" \
+        --arg public_key "$REALITY_PUBLIC_KEY" --arg private_key "$REALITY_PRIVATE_KEY" \
+        --arg short_id "$SHORT_ID" --arg cert "$XHTTP_CERT_FILE" \
+        --arg key "$XHTTP_KEY_FILE" --arg url "$XHTTP_URL" \
+        '{address:$address,port:($port|tonumber),listen:$listen,uuid:$uuid,path:$path,host:$host,mode:$mode,security:$security,trustedXForwardedFor:$xff,sni:$sni,target:$target,publicKey:$public_key,privateKey:$private_key,shortId:$short_id,certificateFile:$cert,keyFile:$key,url:$url}')
+    save_node xhttp "$node_json"
+    echo
+    echo 'VLESS XHTTP 节点参数已保存:'
+    echo "地址: $SERVER_ADDRESS"
+    echo "端口: $XHTTP_PORT"
+    echo "路径: $XHTTP_PATH"
+    echo "模式: $XHTTP_MODE"
+    echo "传输安全: $XHTTP_SECURITY"
+    [ -z "$XHTTP_HOST" ] || echo "Host: $XHTTP_HOST"
+    [ -z "$XHTTP_XFF" ] || echo "信任 XFF 头部: $XHTTP_XFF"
+    [ -z "$old_extra" ] || echo "Extra: $old_extra"
+    echo "$XHTTP_URL"
     if yes_no '现在重启 Xray 使配置生效' yes; then
         restart_xray
     fi
@@ -1018,13 +1514,14 @@ menu() {
             '1) 配置/修改 VLESS Reality' \
             '2) 配置/修改 Shadowsocks 2022' \
             '3) 配置/修改 Hysteria2' \
-            '4) 重启 Xray' \
-            '5) 查看状态' \
-            '6) 查看节点和配置摘要' \
-            '7) 卸载 Xray（可选择保留备份或清空）' \
-            '8) 编辑 Xray 配置文件' \
-            '9) 删除 VLESS Reality、Shadowsocks 2022 或 Hysteria2' \
-            '10) 设置所有 Freedom 直连出站的 IP 模式' \
+            '4) 配置/修改 VLESS XHTTP' \
+            '5) 重启 Xray' \
+            '6) 查看状态' \
+            '7) 查看节点和配置摘要' \
+            '8) 卸载 Xray（可选择保留备份或清空）' \
+            '9) 编辑 Xray 配置文件' \
+            '10) 删除 VLESS Reality、Shadowsocks 2022、Hysteria2 或 VLESS XHTTP' \
+            '11) 设置所有 Freedom 直连出站的 IP 模式' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -1032,15 +1529,16 @@ menu() {
             1) configure_vless ;;
             2) configure_ss ;;
             3) configure_hy2 ;;
-            4) restart_xray ;;
-            5) show_status ;;
-            6) show_summary ;;
-            7) uninstall_xray ;;
-            8) edit_config ;;
-            9) remove_protocol ;;
-            10) configure_outbound_mode ;;
+            4) configure_xhttp ;;
+            5) restart_xray ;;
+            6) show_status ;;
+            7) show_summary ;;
+            8) uninstall_xray ;;
+            9) edit_config ;;
+            10) remove_protocol ;;
+            11) configure_outbound_mode ;;
             0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-10。' ;;
+            *) echo '选择无效，请输入 0-11。' ;;
         esac
     done
 }
@@ -1052,11 +1550,13 @@ main() {
             --vless) ACTION=vless ;;
             --ss|--ss2022) ACTION=ss ;;
             --hy2|--hysteria2) ACTION=hy2 ;;
+            --xhttp) ACTION=xhttp ;;
             --edit) ACTION=edit ;;
             --remove) ACTION=remove ;;
             --remove-vless) ACTION=remove; REMOVE_PROTO=vless ;;
             --remove-ss|--remove-ss2022) ACTION=remove; REMOVE_PROTO=ss2022 ;;
             --remove-hy2|--remove-hysteria2) ACTION=remove; REMOVE_PROTO=hy2 ;;
+            --remove-xhttp) ACTION=remove; REMOVE_PROTO=xhttp ;;
             --restart) ACTION=restart ;;
             --status) ACTION=status ;;
             --uninstall) ACTION=uninstall ;;
@@ -1083,6 +1583,7 @@ main() {
         vless) configure_vless ;;
         ss) configure_ss ;;
         hy2) configure_hy2 ;;
+        xhttp) configure_xhttp ;;
         edit) edit_config ;;
         remove) remove_protocol ;;
         restart) restart_xray ;;

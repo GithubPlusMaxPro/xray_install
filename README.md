@@ -5,6 +5,7 @@
 - VLESS Reality
 - Shadowsocks 2022
 - Hysteria2
+- VLESS XHTTP
 
 配置完成后，终端会显示节点分享链接和二维码。
 
@@ -26,7 +27,7 @@ sh xray.sh
 curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/xray.sh | sh
 ```
 
-首次运行会检查系统、安装所需软件、安装 Xray 并启动管理菜单。脚本不会自动创建 VLESS、SS2022 或 Hysteria2 节点，选择对应菜单并保存后才会创建。
+首次运行会检查系统、安装所需软件、安装 Xray 并启动管理菜单。脚本不会自动创建 VLESS、SS2022、Hysteria2 或 VLESS XHTTP 节点，选择对应菜单并保存后才会创建。
 
 ## 二、菜单
 
@@ -36,13 +37,14 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 1) 配置/修改 VLESS Reality
 2) 配置/修改 Shadowsocks 2022
 3) 配置/修改 Hysteria2
-4) 重启 Xray
-5) 查看状态
-6) 查看节点和配置摘要
-7) 卸载 Xray
-8) 编辑 Xray 配置文件
-9) 删除节点
-10) 设置所有 Freedom 直连出站的 IP 模式
+4) 配置/修改 VLESS XHTTP
+5) 重启 Xray
+6) 查看状态
+7) 查看节点和配置摘要
+8) 卸载 Xray（可选择保留备份或清空）
+9) 编辑 Xray 配置文件
+10) 删除 VLESS Reality、Shadowsocks 2022、Hysteria2 或 VLESS XHTTP
+11) 设置所有 Freedom 直连出站的 IP 模式
 0) 退出
 ```
 
@@ -67,6 +69,23 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 - 是否保留现有 UUID 和 Reality 密钥
 
 如果重新生成 UUID 或 Reality 密钥，已经导入客户端的旧节点需要重新导入。
+
+### 创建 VLESS XHTTP
+
+1. 选择 `4`（或直接运行 `sh xray.sh --xhttp`）。
+2. 填写服务器域名或公网 IP、端口、XHTTP 路径（默认随机生成）以及可选的 Host。
+3. 选择 XHTTP 传输模式：
+   - `auto`：自动协商（推荐）
+   - `packet-up`：分包上行，CDN/反代兼容性最好
+   - `stream-up`：流式上行，上下行分离
+   - `stream-one`：单连接双向流
+4. 选择传输安全模式：
+   - `reality`：无需证书，适合直连（按提示填写伪装目标和 SNI）
+   - `tls`：使用已有 TLS 证书（填写 SNI、证书和私钥路径，可选配置信任的 XFF 头部）
+   - `none`：无 TLS，默认监听 `127.0.0.1`，适合配合 Nginx/Caddy/CDN 反代（可选配置信任的 XFF 头部）
+5. 保存并重启。
+
+VLESS XHTTP 入站不使用 `xtls-rprx-vision` flow，脚本会自动生成标准 `type=xhttp` 分享链接与二维码。如需设置 `xhttpSettings.extra`（如 `xmux` 或 `downloadSettings`），可通过菜单 `9` 编辑配置文件；查看节点摘要时会自动把 `extra` 编码进分享链接。
 
 ## 四、创建 Shadowsocks 2022
 
@@ -95,7 +114,8 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 5. 填写证书完整路径。
 6. 填写私钥完整路径。
 7. 设置密码。
-8. 保存并重启。
+8. 可选填写端口跳跃范围（如 `20000-50000`；留空则不启用）。
+9. 保存并重启。
 
 证书需要提前准备好。例如：
 
@@ -104,11 +124,11 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 /etc/ssl/xray/privkey.pem
 ```
 
-脚本只读取你填写的证书，不会自动申请证书。使用 Hysteria2 时，要在云服务器安全组和系统防火墙放行对应的 UDP 端口。
+脚本只读取你填写的证书，不会自动申请证书。使用 Hysteria2 时，要在云服务器安全组和系统防火墙放行对应的 UDP 端口；若启用了端口跳跃，脚本会自动在分享链接中加入 `mport` 参数并输出对应的 `nftables` / `iptables` UDP 转发参考命令，请按需执行并放行相应 UDP 端口段。
 
 ## 六、出站 IP 模式
 
-在菜单选择 `10`，可以单独设置所有 `freedom` 直连出站的域名解析策略。配置 VLESS、SS2022 或 Hysteria2 时不会修改这项设置。该策略控制 Xray 连接目标域名时使用的地址族，不限制节点入站监听地址；脚本创建的入站默认监听 `::`，允许 IPv4 和 IPv6 连接。
+在菜单选择 `11`，可以单独设置所有 `freedom` 直连出站的域名解析策略。配置 VLESS、SS2022、Hysteria2 或 VLESS XHTTP 时不会修改这项设置。该策略控制 Xray 连接目标域名时使用的地址族，不限制节点入站监听地址；脚本创建的入站默认监听 `::`（XHTTP `none` 模式默认 `127.0.0.1`），允许 IPv4 和 IPv6 连接。
 
 ```text
 UseIPv6v4  优先使用 IPv6 解析结果；无结果时尝试 IPv4
@@ -121,11 +141,12 @@ AsIs       使用 Xray 默认解析方式
 
 ## 七、查看节点和二维码
 
-选择菜单 `6`，脚本会显示：
+选择菜单 `7`，脚本会显示：
 
 - VLESS 分享链接
 - SS2022 分享链接
 - Hysteria2 分享链接
+- VLESS XHTTP 分享链接
 - 终端二维码
 
 在 v2rayN 等客户端中，可以直接复制分享链接导入。二维码只在当前终端显示，不会生成图片文件。
@@ -136,7 +157,7 @@ AsIs       使用 Xray 默认解析方式
 
 ### 重启
 
-选择菜单 `4`，或执行：
+选择菜单 `5`，或执行：
 
 ```bash
 sh xray.sh --restart
@@ -213,7 +234,7 @@ tail -f /var/log/xray/access.log
 
 ### 查看状态
 
-选择菜单 `5`，或执行：
+选择菜单 `6`，或执行：
 
 ```bash
 sh xray.sh --status
@@ -221,7 +242,7 @@ sh xray.sh --status
 
 ### 编辑配置
 
-选择菜单 `8`，或执行：
+选择菜单 `9`，或执行：
 
 ```bash
 sh xray.sh --edit
@@ -231,7 +252,7 @@ sh xray.sh --edit
 
 ### 删除节点
 
-选择菜单 `9`，然后选择要删除的协议。删除一个协议不会影响其他协议。
+选择菜单 `10`，然后选择要删除的协议。删除一个协议不会影响其他协议。
 
 也可以直接删除：
 
@@ -239,6 +260,7 @@ sh xray.sh --edit
 sh xray.sh --remove-vless
 sh xray.sh --remove-ss
 sh xray.sh --remove-hy2
+sh xray.sh --remove-xhttp
 ```
 
 ### 直接进入配置
@@ -247,6 +269,7 @@ sh xray.sh --remove-hy2
 sh xray.sh --vless
 sh xray.sh --ss
 sh xray.sh --hy2
+sh xray.sh --xhttp
 ```
 
 ### 全部命令
@@ -256,11 +279,13 @@ sh xray.sh                            # 打开交互菜单
 sh xray.sh --vless                    # 直接配置/修改 VLESS Reality
 sh xray.sh --ss                       # 直接配置/修改 Shadowsocks 2022
 sh xray.sh --hy2                      # 直接配置/修改 Hysteria2
+sh xray.sh --xhttp                    # 直接配置/修改 VLESS XHTTP
 sh xray.sh --edit                     # 编辑并检查 Xray 配置文件
 sh xray.sh --remove                   # 交互选择并删除协议
 sh xray.sh --remove-vless             # 删除 VLESS Reality 入站
 sh xray.sh --remove-ss                # 删除 Shadowsocks 2022 入站
 sh xray.sh --remove-hy2               # 删除 Hysteria2 入站
+sh xray.sh --remove-xhttp             # 删除 VLESS XHTTP 入站
 sh xray.sh --restart                  # 重启 Xray
 sh xray.sh --status                   # 查看 Xray 状态
 sh xray.sh --help                     # 查看帮助
@@ -294,7 +319,7 @@ sh xray.sh --uninstall --purge --yes  # 无交互卸载并永久清空数据
 
 修改节点时，脚本会先生成临时配置并检查 Xray 配置。检查通过后才会替换正式配置；检查失败时原配置不会改变。脚本不会为每次修改自动保存旧配置副本。
 
-编辑配置时，菜单第 `7` 项和下面的命令都使用临时文件：
+编辑配置时，菜单第 `9` 项和下面的命令都使用临时文件：
 
 ```bash
 sh xray.sh --edit
@@ -377,3 +402,5 @@ chmod +x xray.sh
 服务器地址输入框会优先读取当前网卡地址。如果服务器在 NAT、容器或内网环境中，自动读取的可能是内网地址，这时请手动改成客户端可以访问的公网 IP 或域名。
 
 项目地址：<https://github.com/GithubPlusMaxPro/xray_install>
+
+
