@@ -44,8 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/GithubPlusMaxPro/xray_install/main/
 8) 卸载 Xray（可选择保留备份或清空）
 9) 编辑 Xray 配置文件
 10) 删除 VLESS Reality、Shadowsocks 2022、Hysteria2 或 VLESS XHTTP
-11) 设置所有 Freedom 直连出站的 IP 模式
-12) 配置 SOCKS5 / WARP 出口路由
+11) 出站与出口路由设置（IP 模式 / SOCKS5 WARP）
 0) 退出
 ```
 
@@ -127,9 +126,13 @@ VLESS XHTTP 入站不使用 `xtls-rprx-vision` flow，脚本会自动生成标�
 
 脚本只读取你填写的证书，不会自动申请证书。使用 Hysteria2 时，要在云服务器安全组和系统防火墙放行对应的 UDP 端口；若启用了端口跳跃，脚本会自动在分享链接中加入 `mport` 参数并输出对应的 `nftables` / `iptables` UDP 转发参考命令，请按需执行并放行相应 UDP 端口段。
 
-## 六、出站 IP 模式
+## 六、出站与出口路由设置
 
-在菜单选择 `11`，可以单独设置所有 `freedom` 直连出站的域名解析策略。配置 VLESS、SS2022、Hysteria2 或 VLESS XHTTP 时不会修改这项设置。该策略控制 Xray 连接目标域名时使用的地址族，不限制节点入站监听地址；脚本创建的入站默认监听 `::`（XHTTP `none` 模式默认 `127.0.0.1`），允许 IPv4 和 IPv6 连接。
+在菜单选择 `11`（或执行 `sh xray.sh --outbound`），可统一管理出站策略与出口路由：
+
+### 1. Freedom 直连出站 IP 模式
+
+选择子菜单 `1`，可以单独设置所有 `freedom` 直连出站的域名解析策略。配置 VLESS、SS2022、Hysteria2 或 VLESS XHTTP 时不会修改这项设置。该策略控制 Xray 连接目标域名时使用的地址族，不限制节点入站监听地址；脚本创建的入站默认监听 `::`（XHTTP `none` 模式默认 `127.0.0.1`），允许 IPv4 和 IPv6 连接。
 
 ```text
 UseIPv6v4  优先使用 IPv6 解析结果；无结果时尝试 IPv4
@@ -140,9 +143,9 @@ AsIs       使用 Xray 默认解析方式
 
 一般双栈服务器可以选择 `UseIPv6v4`。没有 IPv6 出站能力时选择 `UseIPv4`；只有 IPv6 出站能力时选择 `UseIPv6`。这个选择不会关闭 IPv4 入站。
 
-### SOCKS5 / WARP 出口路由
+### 2. SOCKS5 / WARP 出口路由
 
-在菜单选择 `12`（或运行 `sh xray.sh --warp`），可添加 `tag` 为 `warp` 的 SOCKS5 出站（默认 `127.0.0.1:40000`），并选择：
+选择子菜单 `2`（或直接运行 `sh xray.sh --warp`），可添加 `tag` 为 `warp` 的 SOCKS5 出站（默认 `127.0.0.1:40000`），并选择：
 
 - 全局走 `warp` 出口
 - 按域名/geosite 分流走 `warp`（如 `geosite:openai,geosite:netflix`，其余走直连）
@@ -296,7 +299,8 @@ sh xray.sh --vless                    # 直接配置/修改 VLESS Reality
 sh xray.sh --ss                       # 直接配置/修改 Shadowsocks 2022
 sh xray.sh --hy2                      # 直接配置/修改 Hysteria2
 sh xray.sh --xhttp                    # 直接配置/修改 VLESS XHTTP
-sh xray.sh --warp                     # 配置 SOCKS5 / WARP 出口路由
+sh xray.sh --outbound                 # 出站与出口路由设置（IP 模式 / SOCKS5 WARP）
+sh xray.sh --warp                     # 直接配置 SOCKS5 / WARP 出口路由
 sh xray.sh --edit                     # 编辑并检查 Xray 配置文件
 sh xray.sh --remove                   # 交互选择并删除协议
 sh xray.sh --remove-vless             # 删除 VLESS Reality 入站

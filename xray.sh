@@ -30,7 +30,8 @@ usage() {
   sh xray.sh --ss            直接配置/修改 Shadowsocks 2022
   sh xray.sh --hy2           直接配置/修改 Hysteria2
   sh xray.sh --xhttp         直接配置/修改 VLESS XHTTP
-  sh xray.sh --warp          配置 SOCKS5 / WARP 出口路由
+  sh xray.sh --outbound      出站与出口路由设置（IP 模式 / SOCKS5 WARP）
+  sh xray.sh --warp          直接配置 SOCKS5 / WARP 出口路由
   sh xray.sh --edit          编辑并检查 Xray 配置文件
   sh xray.sh --remove        交互选择并删除 VLESS、SS2022、Hysteria2 或 XHTTP
   sh xray.sh --remove-vless  删除 VLESS Reality 入站
@@ -1660,6 +1661,25 @@ configure_socks_outbound() {
     fi
 }
 
+configure_outbound_menu() {
+    echo
+    echo '=== 出站与出口路由设置 ==='
+    echo "当前直连 IP 模式: $(get_domain_strategy)"
+    echo "当前 SOCKS5 / WARP 出口: $(get_warp_route_summary)"
+    echo
+    printf '%s\n' \
+        '  1) 设置所有 Freedom 直连出站的 IP 模式（UseIPv6v4 / UseIPv4 / UseIPv6 / AsIs）' \
+        '  2) 配置 SOCKS5 / WARP 出口路由' \
+        '  0) 返回' > /dev/tty
+    sub_choice=$(prompt_input '请选择' '')
+    case "$sub_choice" in
+        1) configure_outbound_mode ;;
+        2) configure_socks_outbound ;;
+        0|q|Q|'') return 0 ;;
+        *) echo '选择无效，请输入 0、1 或 2。' ;;
+    esac
+}
+
 menu() {
     [ -r /dev/tty ] && [ -w /dev/tty ] || die "交互菜单需要可用的终端。"
     while :; do
@@ -1674,8 +1694,7 @@ menu() {
             '8) 卸载 Xray（可选择保留备份或清空）' \
             '9) 编辑 Xray 配置文件' \
             '10) 删除 VLESS Reality、Shadowsocks 2022、Hysteria2 或 VLESS XHTTP' \
-            '11) 设置所有 Freedom 直连出站的 IP 模式' \
-            '12) 配置 SOCKS5 / WARP 出口路由' \
+            '11) 出站与出口路由设置（IP 模式 / SOCKS5 WARP）' \
             '0) 退出' \
             '=================================' > /dev/tty
         choice=$(prompt_input '请选择' '')
@@ -1690,10 +1709,9 @@ menu() {
             8) uninstall_xray ;;
             9) edit_config ;;
             10) remove_protocol ;;
-            11) configure_outbound_mode ;;
-            12) configure_socks_outbound ;;
+            11) configure_outbound_menu ;;
             0|q|Q) exit 0 ;;
-            *) echo '选择无效，请输入 0-12。' ;;
+            *) echo '选择无效，请输入 0-11。' ;;
         esac
     done
 }
@@ -1706,6 +1724,7 @@ main() {
             --ss|--ss2022) ACTION=ss ;;
             --hy2|--hysteria2) ACTION=hy2 ;;
             --xhttp) ACTION=xhttp ;;
+            --outbound) ACTION=outbound ;;
             --warp|--socks-outbound) ACTION=warp ;;
             --edit) ACTION=edit ;;
             --remove) ACTION=remove ;;
@@ -1740,6 +1759,7 @@ main() {
         ss) configure_ss ;;
         hy2) configure_hy2 ;;
         xhttp) configure_xhttp ;;
+        outbound) configure_outbound_menu ;;
         warp) configure_socks_outbound ;;
         edit) edit_config ;;
         remove) remove_protocol ;;
